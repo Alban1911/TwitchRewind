@@ -94,6 +94,49 @@
     return `https://usher.ttvnw.net/vod/${vodId}.m3u8?${p}`;
   }
 
+  // ─── Sub-only VOD fallback (direct CDN) ───────────────────────────────────
+
+  async function fetchVodMetadata(vodId) {
+    const data = await gql({
+      query: `query{video(id:"${vodId}"){broadcastType createdAt seekPreviewsURL owner{login}}}`,
+    });
+    return data?.data?.video;
+  }
+
+  function buildDirectVodUrl(meta, vodId, quality) {
+    if (!meta?.seekPreviewsURL) return null;
+    const url = new URL(meta.seekPreviewsURL);
+    const domain = url.host;
+    const parts = url.pathname.split('/');
+    const sbIdx = parts.findIndex((p) => p.includes('storyboards'));
+    if (sbIdx < 1) return null;
+    const vodSpecialId = parts[sbIdx - 1];
+    const type = (meta.broadcastType || '').toLowerCase();
+    if (type === 'highlight') {
+      return `https://${domain}/${vodSpecialId}/${quality}/highlight-${vodId}.m3u8`;
+    }
+    return `https://${domain}/${vodSpecialId}/${quality}/index-dvr.m3u8`;
+  }
+
+  const VOD_QUALITIES = ['chunked', '1080p60', '720p60', '480p30', '360p30', '160p30'];
+
+  async function findDirectVodUrl(vodId) {
+    const meta = await fetchVodMetadata(vodId);
+    if (!meta?.seekPreviewsURL) return null;
+    for (const q of VOD_QUALITIES) {
+      const url = buildDirectVodUrl(meta, vodId, q);
+      if (!url) continue;
+      try {
+        const res = await fetch(url, { method: 'HEAD' });
+        if (res.ok) {
+          log('Direct CDN quality found:', q);
+          return url;
+        }
+      } catch (_) { /* try next */ }
+    }
+    return null;
+  }
+
   // ─── DOM ────────────────────────────────────────────────────────────────────
 
   function playerContainer() {
@@ -165,13 +208,29 @@
     log('Rewind → seek to', formatTime(seekTo));
 
     try {
+      let url;
       const tok = await fetchVodToken(state.vodId);
-      if (!tok) {
+      if (tok) {
+        url = vodPlaylistUrl(state.vodId, tok.value, tok.signature);
+        // Verify the usher URL actually works (sub-only VODs return 403)
+        try {
+          const check = await fetch(url);
+          if (!check.ok) {
+            log('Token URL returned', check.status, '— trying direct CDN');
+            url = null;
+          }
+        } catch (_) { url = null; }
+      }
+
+      if (!url) {
+        log('Trying direct CDN bypass for sub-only VOD');
+        url = await findDirectVodUrl(state.vodId);
+      }
+
+      if (!url) {
         notify('Cannot access VOD — may be subscriber-only');
         return;
       }
-
-      const url = vodPlaylistUrl(state.vodId, tok.value, tok.signature);
 
       if (!state.ui.overlay) createOverlay();
 
