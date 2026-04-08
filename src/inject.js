@@ -226,30 +226,7 @@
     stopSeekUpdates();
   }
 
-  // ─── UI — Rewind button ────────────────────────────────────────────────────
-
-  function addRewindButton() {
-    if (document.getElementById('tr-btn')) return;
-
-    const btn = document.createElement('button');
-    btn.id = 'tr-btn';
-    btn.className = 'tr-btn';
-    btn.title = 'Rewind Stream';
-    btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`;
-    btn.addEventListener('click', onRewindClick);
-
-    const controls = playerControls();
-    if (controls) {
-      controls.insertBefore(btn, controls.firstChild);
-    } else {
-      const c = playerContainer();
-      if (c) {
-        btn.classList.add('tr-btn--float');
-        c.appendChild(btn);
-      }
-    }
-    state.ui.btn = btn;
-  }
+  // ─── UI — Rewind button (kept for manual toggle if needed) ─────────────────
 
   function removeRewindButton() {
     document.getElementById('tr-btn')?.remove();
@@ -506,11 +483,14 @@
         state.vodId = vod.id;
         state.vodCreatedAt = vod.createdAt;
         log('VOD found:', vod.id);
-        addRewindButton();
+        // Auto-start rewind at the live position
+        if (!state.isRewinding) {
+          const elapsed = streamElapsed();
+          startRewind(Math.max(0, elapsed - 5));
+        }
       } else {
         state.vodId = null;
         state.vodCreatedAt = null;
-        removeRewindButton();
       }
     } catch (e) {
       log('VOD check error:', e);
@@ -529,15 +509,6 @@
   }
 
   // ─── Event handlers ────────────────────────────────────────────────────────
-
-  function onRewindClick() {
-    if (state.isRewinding) {
-      stopRewind();
-    } else {
-      const elapsed = streamElapsed();
-      startRewind(Math.max(0, elapsed - 30));
-    }
-  }
 
   // ─── Cleanup ───────────────────────────────────────────────────────────────
 
