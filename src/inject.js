@@ -313,6 +313,18 @@
     wrapper.appendChild(infoRow);
     container.appendChild(wrapper);
 
+    // Show/hide with mouse movement on the player
+    let hideTimer;
+    container.addEventListener('mousemove', () => {
+      wrapper.classList.add('tr-persistent--visible');
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => wrapper.classList.remove('tr-persistent--visible'), 3000);
+    });
+    container.addEventListener('mouseleave', () => {
+      clearTimeout(hideTimer);
+      wrapper.classList.remove('tr-persistent--visible');
+    });
+
     state.ui.persistentSeekBar = seekBar;
     state.ui.persistentTime = timeEl;
     state.ui.liveBtn = liveBtn;
