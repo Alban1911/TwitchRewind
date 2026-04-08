@@ -1,21 +1,16 @@
 // Twitch Rewind — Injected Page Script
-// Runs in the page context with access to Twitch internals.
-//
-// Two modes:
-//   LIVE  → native Twitch player, persistent seek bar visible
-//   REWIND → VOD overlay with full controls, seek bar triggers this
+// Click rewind button → VOD overlay with custom UI
+// Click LIVE → back to native Twitch player
 
 (function () {
   'use strict';
 
-  // ─── Constants ──────────────────────────────────────────────────────────────
   const TWITCH_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
   const GQL_URL = 'https://gql.twitch.tv/gql';
   const VOD_CHECK_INTERVAL = 30000;
   const SEEK_STEP = 10;
   const MIN_REWIND_SEC = 15;
 
-  // ─── State ──────────────────────────────────────────────────────────────────
   const state = {
     enabled: true,
     channel: null,
@@ -50,12 +45,12 @@
       : `${m}:${String(s).padStart(2, '0')}`;
   }
 
-  function streamElapsed() {
+  function elapsed() {
     if (!state.vodCreatedAt) return 0;
     return (Date.now() - new Date(state.vodCreatedAt).getTime()) / 1000;
   }
 
-  // ─── GQL helpers ────────────────────────────────────────────────────────────
+  // ─── GQL ────────────────────────────────────────────────────────────────────
 
   async function gql(body) {
     const headers = {
@@ -64,12 +59,7 @@
     };
     const token = getAuthToken();
     if (token) headers['Authorization'] = `OAuth ${token}`;
-
-    const res = await fetch(GQL_URL, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    });
+    const res = await fetch(GQL_URL, { method: 'POST', headers, body: JSON.stringify(body) });
     if (!res.ok) throw new Error(`GQL ${res.status}`);
     return res.json();
   }
@@ -90,31 +80,21 @@
     const data = await gql({
       operationName: 'PlaybackAccessToken_Template',
       query: `query PlaybackAccessToken_Template($login:String!,$isLive:Boolean!,$vodID:ID!,$isVod:Boolean!,$playerType:String!){streamPlaybackAccessToken(channelName:$login,params:{platform:"web",playerBackend:"mediaplayer",playerType:$playerType})@include(if:$isLive){value signature __typename}videoPlaybackAccessToken(id:$vodID,params:{platform:"web",playerBackend:"mediaplayer",playerType:$playerType})@include(if:$isVod){value signature __typename}}`,
-      variables: {
-        login: '',
-        isLive: false,
-        vodID: vodId,
-        isVod: true,
-        playerType: 'site',
-      },
+      variables: { login: '', isLive: false, vodID: vodId, isVod: true, playerType: 'site' },
     });
     return data?.data?.videoPlaybackAccessToken;
   }
 
   function vodPlaylistUrl(vodId, token, sig) {
     const p = new URLSearchParams({
-      allow_source: 'true',
-      allow_audio_only: 'true',
-      allow_spectre: 'true',
-      player: 'twitchweb',
-      playlist_include_framerate: 'true',
-      nauth: token,
-      nauthsig: sig,
+      allow_source: 'true', allow_audio_only: 'true', allow_spectre: 'true',
+      player: 'twitchweb', playlist_include_framerate: 'true',
+      nauth: token, nauthsig: sig,
     });
     return `https://usher.ttvnw.net/vod/${vodId}.m3u8?${p}`;
   }
 
-  // ─── DOM queries ────────────────────────────────────────────────────────────
+  // ─── DOM ────────────────────────────────────────────────────────────────────
 
   function playerContainer() {
     return (
@@ -127,12 +107,51 @@
   function twitchVideo() {
     const c = playerContainer();
     if (!c) return null;
-    // Skip our own overlay video
     const videos = c.querySelectorAll('video:not(.tr-video)');
     return videos[0] || null;
   }
 
-  // ─── Rewind playback (VOD overlay) ─────────────────────────────────────────
+  function playerControls() {
+    return (
+      document.querySelector('.player-controls__right-control-group') ||
+      document.querySelector('[data-a-target="player-controls"]')
+    );
+  }
+
+  // ─── Rewind button (in native Twitch controls) ────────────────────────────
+
+  function addRewindButton() {
+    if (document.getElementById('tr-btn')) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'tr-btn';
+    btn.className = 'tr-btn';
+    btn.title = 'Rewind Stream';
+    btn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`;
+    btn.addEventListener('click', () => {
+      const e = elapsed();
+      startRewind(Math.max(0, e - MIN_REWIND_SEC));
+    });
+
+    const controls = playerControls();
+    if (controls) {
+      controls.insertBefore(btn, controls.firstChild);
+    } else {
+      const c = playerContainer();
+      if (c) {
+        btn.classList.add('tr-btn--float');
+        c.appendChild(btn);
+      }
+    }
+    state.ui.btn = btn;
+  }
+
+  function removeRewindButton() {
+    document.getElementById('tr-btn')?.remove();
+    state.ui.btn = null;
+  }
+
+  // ─── Rewind (VOD playback) ─────────────────────────────────────────────────
 
   async function startRewind(seekTo) {
     if (!state.vodId) {
@@ -140,12 +159,10 @@
       return;
     }
 
-    // Enforce minimum rewind of 10 seconds from live
-    const elapsed = streamElapsed();
-    const maxSeek = elapsed - MIN_REWIND_SEC;
-    if (seekTo > maxSeek) seekTo = Math.max(0, maxSeek);
+    const maxSeek = Math.max(0, elapsed() - MIN_REWIND_SEC);
+    seekTo = Math.max(0, Math.min(seekTo, maxSeek));
 
-    log('Starting rewind → seek to', formatTime(seekTo));
+    log('Rewind → seek to', formatTime(seekTo));
 
     try {
       const tok = await fetchVodToken(state.vodId);
@@ -197,19 +214,14 @@
 
       state.isRewinding = true;
 
-      // Show overlay, hide native player visually
+      // Show overlay, mute native
       state.ui.overlay.style.display = 'flex';
-      state.ui.overlay.focus();
-
-      // Mute original stream
       const orig = twitchVideo();
       if (orig) {
         orig._trSavedVolume = orig.volume;
         orig.volume = 0;
       }
 
-      // Update seek bar to reflect rewind mode
-      updateLiveBtn(false);
       startSeekUpdates();
     } catch (err) {
       log('Rewind failed:', err);
@@ -227,153 +239,25 @@
       state.hlsInstance = null;
     }
 
-    // Restore original player audio
+    // Hide overlay
+    if (state.ui.overlay) {
+      state.ui.overlay.style.display = 'none';
+    }
+
+    // Restore native player
     const orig = twitchVideo();
     if (orig && orig._trSavedVolume !== undefined) {
       orig.volume = orig._trSavedVolume;
       delete orig._trSavedVolume;
     }
 
-    // Hide overlay
-    if (state.ui.overlay) {
-      state.ui.overlay.style.display = 'none';
-    }
-
     stopSeekUpdates();
-    updateLiveBtn(true);
-
-    // Reset persistent seek bar to live position
-    if (state.ui.persistentSeekBar) {
-      state.ui.persistentSeekBar.value = 1000;
-    }
-    if (state.ui.persistentTime) {
-      const e = streamElapsed();
-      state.ui.persistentTime.textContent = formatTime(e);
-    }
   }
 
-  function updateLiveBtn(isLive) {
-    if (state.ui.liveBtn) {
-      state.ui.liveBtn.classList.toggle('tr-live-btn--active', isLive);
-    }
-  }
-
-  // ─── UI — Persistent seek bar (always visible on native player) ────────────
-
-  function addPersistentSeekBar() {
-    if (document.getElementById('tr-persistent')) return;
-
-    const container = playerContainer();
-    if (!container) return;
-
-    const wrapper = document.createElement('div');
-    wrapper.id = 'tr-persistent';
-    wrapper.className = 'tr-persistent';
-
-    // Seek bar
-    const seekBar = document.createElement('input');
-    seekBar.type = 'range';
-    seekBar.className = 'tr-seekbar tr-persistent-seekbar';
-    seekBar.min = '0';
-    seekBar.max = '1000';
-    seekBar.value = '1000';
-
-    // When user drags the seek bar, enter rewind mode
-    seekBar.addEventListener('change', () => {
-      const elapsed = streamElapsed();
-      const seekTo = (seekBar.value / 1000) * elapsed;
-      // If near live edge, go live instead
-      if (elapsed - seekTo < MIN_REWIND_SEC) {
-        if (state.isRewinding) goLive();
-        seekBar.value = 1000;
-        return;
-      }
-      startRewind(seekTo);
-    });
-
-    // Info row
-    const infoRow = document.createElement('div');
-    infoRow.className = 'tr-persistent-info';
-
-    const timeEl = document.createElement('span');
-    timeEl.className = 'tr-persistent-time';
-    timeEl.textContent = formatTime(streamElapsed());
-
-    const liveBtn = document.createElement('button');
-    liveBtn.className = 'tr-live-btn tr-live-btn--active';
-    liveBtn.textContent = 'LIVE';
-    liveBtn.addEventListener('click', () => {
-      if (state.isRewinding) goLive();
-    });
-
-    infoRow.appendChild(timeEl);
-    infoRow.appendChild(liveBtn);
-
-    wrapper.appendChild(seekBar);
-    wrapper.appendChild(infoRow);
-    container.appendChild(wrapper);
-
-    // Show/hide with mouse movement on the player
-    let hideTimer;
-    container.addEventListener('mousemove', () => {
-      wrapper.classList.add('tr-persistent--visible');
-      clearTimeout(hideTimer);
-      hideTimer = setTimeout(() => wrapper.classList.remove('tr-persistent--visible'), 3000);
-    });
-    container.addEventListener('mouseleave', () => {
-      clearTimeout(hideTimer);
-      wrapper.classList.remove('tr-persistent--visible');
-    });
-
-    state.ui.persistentSeekBar = seekBar;
-    state.ui.persistentTime = timeEl;
-    state.ui.liveBtn = liveBtn;
-    state.ui.persistentWrapper = wrapper;
-
-    // Start updating the time display
-    startPersistentUpdates();
-  }
-
-  function removePersistentSeekBar() {
-    document.getElementById('tr-persistent')?.remove();
-    stopPersistentUpdates();
-    state.ui.persistentSeekBar = null;
-    state.ui.persistentTime = null;
-    state.ui.liveBtn = null;
-    state.ui.persistentWrapper = null;
-  }
-
-  let persistentInterval = null;
-
-  function startPersistentUpdates() {
-    stopPersistentUpdates();
-    persistentInterval = setInterval(updatePersistentBar, 1000);
-  }
-
-  function stopPersistentUpdates() {
-    clearInterval(persistentInterval);
-    persistentInterval = null;
-  }
-
-  function updatePersistentBar() {
-    const elapsed = streamElapsed();
-
-    // When in live mode, keep the bar at the right edge and show total time
-    if (!state.isRewinding) {
-      if (state.ui.persistentSeekBar && !state.ui.persistentSeekBar.matches(':active')) {
-        state.ui.persistentSeekBar.value = 1000;
-      }
-      if (state.ui.persistentTime) {
-        state.ui.persistentTime.textContent = formatTime(elapsed);
-      }
-    }
-  }
-
-  // ─── UI — VOD Overlay (only shown when rewinding) ─────────────────────────
+  // ─── Overlay (shown only when rewinding) ───────────────────────────────────
 
   function createOverlay() {
     document.getElementById('tr-overlay')?.remove();
-
     const container = playerContainer();
     if (!container) return;
 
@@ -390,14 +274,13 @@
     video.autoplay = true;
     overlay.appendChild(video);
 
-    // Controls wrapper
+    // Controls bar
     const bar = document.createElement('div');
     bar.className = 'tr-controls';
 
-    // ── Seek bar row ──
+    // Seek bar
     const seekRow = document.createElement('div');
     seekRow.className = 'tr-seek-row';
-
     const seekBar = document.createElement('input');
     seekBar.type = 'range';
     seekBar.className = 'tr-seekbar';
@@ -405,36 +288,45 @@
     seekBar.max = '1000';
     seekBar.value = '1000';
     seekBar.addEventListener('input', () => {
-      const elapsed = streamElapsed();
-      const maxTime = elapsed - MIN_REWIND_SEC;
-      const t = Math.min((seekBar.value / 1000) * elapsed, maxTime);
+      const total = elapsed();
+      const maxSeek = Math.max(0, total - MIN_REWIND_SEC);
+      const t = Math.min((seekBar.value / 1000) * total, maxSeek);
       if (state.overlayVideo) state.overlayVideo.currentTime = t;
     });
     seekRow.appendChild(seekBar);
     bar.appendChild(seekRow);
 
-    // ── Buttons row ──
+    // Buttons row
     const btnRow = document.createElement('div');
     btnRow.className = 'tr-btn-row';
 
-    const playBtn = mkBtn(
-      `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`,
-      () => { video.paused ? video.play() : video.pause(); },
-    );
+    const playBtn = mkBtn(pauseSvg, () => {
+      if (state.overlayVideo) {
+        state.overlayVideo.paused ? state.overlayVideo.play() : state.overlayVideo.pause();
+      }
+    });
 
     const backBtn = mkBtn(
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 5V1l-5 5 5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6h-2c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>`,
-      () => { video.currentTime = Math.max(0, video.currentTime - SEEK_STEP); },
+      () => {
+        if (state.overlayVideo) {
+          state.overlayVideo.currentTime = Math.max(0, state.overlayVideo.currentTime - SEEK_STEP);
+        }
+      },
     );
 
     const fwdBtn = mkBtn(
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.5 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg>`,
-      () => { video.currentTime = Math.min(streamElapsed() - MIN_REWIND_SEC, video.currentTime + SEEK_STEP); },
+      () => {
+        if (state.overlayVideo) {
+          const max = elapsed() - MIN_REWIND_SEC;
+          state.overlayVideo.currentTime = Math.min(max, state.overlayVideo.currentTime + SEEK_STEP);
+        }
+      },
     );
 
     const timeEl = document.createElement('span');
     timeEl.className = 'tr-time';
-    timeEl.textContent = '0:00 / 0:00';
 
     const spacer = document.createElement('div');
     spacer.style.flex = '1';
@@ -442,11 +334,11 @@
     const behindEl = document.createElement('span');
     behindEl.className = 'tr-behind';
 
+    // Volume
     const volBtn = mkBtn(
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>`,
-      () => { video.muted = !video.muted; },
+      () => { if (state.overlayVideo) state.overlayVideo.muted = !state.overlayVideo.muted; },
     );
-
     const volSlider = document.createElement('input');
     volSlider.type = 'range';
     volSlider.className = 'tr-volume';
@@ -455,15 +347,16 @@
     volSlider.step = '0.05';
     volSlider.value = '1';
     volSlider.addEventListener('input', () => {
-      video.volume = parseFloat(volSlider.value);
+      if (state.overlayVideo) state.overlayVideo.volume = parseFloat(volSlider.value);
     });
 
-    // LIVE button inside overlay → go back to live
-    const overlayLiveBtn = document.createElement('button');
-    overlayLiveBtn.className = 'tr-live-btn';
-    overlayLiveBtn.textContent = 'LIVE';
-    overlayLiveBtn.addEventListener('click', goLive);
+    // LIVE button
+    const liveBtn = document.createElement('button');
+    liveBtn.className = 'tr-live-btn';
+    liveBtn.textContent = 'LIVE';
+    liveBtn.addEventListener('click', goLive);
 
+    // Fullscreen
     const fsBtn = mkBtn(
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>`,
       () => {
@@ -472,25 +365,37 @@
       },
     );
 
-    btnRow.append(playBtn, backBtn, fwdBtn, timeEl, spacer, behindEl, volBtn, volSlider, overlayLiveBtn, fsBtn);
+    btnRow.append(playBtn, backBtn, fwdBtn, timeEl, spacer, behindEl, volBtn, volSlider, liveBtn, fsBtn);
     bar.appendChild(btnRow);
     overlay.appendChild(bar);
 
     // Keyboard shortcuts
     overlay.addEventListener('keydown', (e) => {
       const handlers = {
-        ArrowLeft: () => { video.currentTime = Math.max(0, video.currentTime - SEEK_STEP); },
-        ArrowRight: () => { video.currentTime = Math.min(streamElapsed() - MIN_REWIND_SEC, video.currentTime + SEEK_STEP); },
-        ' ': () => { video.paused ? video.play() : video.pause(); },
+        ArrowLeft: () => {
+          if (state.overlayVideo) state.overlayVideo.currentTime = Math.max(0, state.overlayVideo.currentTime - SEEK_STEP);
+        },
+        ArrowRight: () => {
+          if (state.overlayVideo) {
+            const max = elapsed() - MIN_REWIND_SEC;
+            state.overlayVideo.currentTime = Math.min(max, state.overlayVideo.currentTime + SEEK_STEP);
+          }
+        },
+        ' ': () => {
+          if (state.overlayVideo) state.overlayVideo.paused ? state.overlayVideo.play() : state.overlayVideo.pause();
+        },
         Escape: goLive,
-        f: () => { document.fullscreenElement ? document.exitFullscreen() : overlay.requestFullscreen(); },
+        f: () => {
+          if (document.fullscreenElement) document.exitFullscreen();
+          else overlay.requestFullscreen();
+        },
       };
       if (handlers[e.key]) { handlers[e.key](); e.preventDefault(); }
     });
 
     video.addEventListener('click', () => { video.paused ? video.play() : video.pause(); });
 
-    // Toggle controls visibility
+    // Show/hide controls on hover
     let hideTimer;
     overlay.addEventListener('mousemove', () => {
       bar.classList.add('tr-controls--visible');
@@ -512,6 +417,9 @@
     state.ui.playBtn = playBtn;
   }
 
+  const pauseSvg = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
+  const playSvg = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
+
   function mkBtn(svg, onClick) {
     const b = document.createElement('button');
     b.className = 'tr-ctrl-btn';
@@ -531,7 +439,7 @@
     setTimeout(() => el.remove(), 4000);
   }
 
-  // ─── Seek bar updates (overlay) ────────────────────────────────────────────
+  // ─── Seek updates ──────────────────────────────────────────────────────────
 
   function startSeekUpdates() {
     stopSeekUpdates();
@@ -546,7 +454,7 @@
   function updateSeek() {
     if (!state.isRewinding || !state.overlayVideo) return;
     const cur = state.overlayVideo.currentTime;
-    const total = streamElapsed();
+    const total = elapsed();
     const behind = Math.max(0, total - cur);
 
     if (state.ui.timeEl) {
@@ -556,20 +464,10 @@
       state.ui.seekBar.value = total > 0 ? (cur / total) * 1000 : 1000;
     }
     if (state.ui.behindEl) {
-      state.ui.behindEl.textContent = behind > 5 ? `-${formatTime(behind)}` : '';
+      state.ui.behindEl.textContent = behind > MIN_REWIND_SEC + 5 ? `-${formatTime(behind)}` : '';
     }
     if (state.ui.playBtn) {
-      state.ui.playBtn.innerHTML = state.overlayVideo.paused
-        ? `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`
-        : `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
-    }
-
-    // Also sync the persistent seek bar position
-    if (state.ui.persistentSeekBar && !state.ui.persistentSeekBar.matches(':active')) {
-      state.ui.persistentSeekBar.value = total > 0 ? (cur / total) * 1000 : 1000;
-    }
-    if (state.ui.persistentTime) {
-      state.ui.persistentTime.textContent = `${formatTime(cur)} / ${formatTime(total)}`;
+      state.ui.playBtn.innerHTML = state.overlayVideo.paused ? playSvg : pauseSvg;
     }
   }
 
@@ -607,11 +505,11 @@
         state.vodId = vod.id;
         state.vodCreatedAt = vod.createdAt;
         log('VOD found:', vod.id);
-        addPersistentSeekBar();
+        addRewindButton();
       } else {
         state.vodId = null;
         state.vodCreatedAt = null;
-        removePersistentSeekBar();
+        removeRewindButton();
       }
     } catch (e) {
       log('VOD check error:', e);
@@ -632,10 +530,10 @@
   // ─── Cleanup ───────────────────────────────────────────────────────────────
 
   function cleanup() {
-    if (state.isRewinding) goLive();
+    goLive();
     clearInterval(state.vodCheckInterval);
     state.vodCheckInterval = null;
-    removePersistentSeekBar();
+    removeRewindButton();
     document.getElementById('tr-overlay')?.remove();
     state.channel = null;
     state.vodId = null;
@@ -644,14 +542,10 @@
     state.ui = {};
   }
 
-  // ─── SPA navigation hooks ─────────────────────────────────────────────────
+  // ─── SPA navigation ───────────────────────────────────────────────────────
 
   function hookNavigation() {
-    const wrap = (orig) =>
-      function (...args) {
-        orig.apply(this, args);
-        onNavigate();
-      };
+    const wrap = (orig) => function (...args) { orig.apply(this, args); onNavigate(); };
     history.pushState = wrap(history.pushState);
     history.replaceState = wrap(history.replaceState);
     window.addEventListener('popstate', onNavigate);

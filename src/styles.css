@@ -1,48 +1,36 @@
 /* Twitch Rewind — Injected Styles */
 
-/* ─── Persistent seek bar (always visible on live player) ─────────────────── */
+/* ─── Rewind button in native Twitch controls ────────────────────────────── */
 
-.tr-persistent {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 35;
-  display: flex;
-  flex-direction: column;
-  padding: 0 10px 6px;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.25s;
-}
-
-.tr-persistent:hover,
-.tr-persistent--visible {
-  opacity: 1;
-}
-
-.tr-persistent > * {
-  pointer-events: auto;
-}
-
-.tr-persistent-seekbar {
-  margin-bottom: 4px;
-}
-
-.tr-persistent-info {
+.tr-btn {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 2px;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #efeff1;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
 }
 
-.tr-persistent-time {
-  color: #efeff1;
-  font-size: 12px;
-  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  white-space: nowrap;
-  user-select: none;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+.tr-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.tr-btn--float {
+  position: absolute;
+  bottom: 60px;
+  right: 10px;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.6);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
 }
 
 /* ─── Overlay (VOD rewind mode) ───────────────────────────────────────────── */
@@ -63,7 +51,7 @@
   background: #000;
 }
 
-/* ─── Overlay controls bar ────────────────────────────────────────────────── */
+/* ─── Controls bar ────────────────────────────────────────────────────────── */
 
 .tr-controls {
   position: absolute;
@@ -86,12 +74,10 @@
   opacity: 1;
 }
 
-/* Seek bar row */
+/* Seek bar */
 .tr-seek-row {
   padding: 0 4px 6px;
 }
-
-/* ─── Shared seek bar styling ─────────────────────────────────────────────── */
 
 .tr-seekbar {
   -webkit-appearance: none;
@@ -171,7 +157,7 @@
   padding: 0 4px;
 }
 
-/* Volume slider */
+/* Volume */
 .tr-volume {
   -webkit-appearance: none;
   appearance: none;
@@ -194,8 +180,7 @@
   border: none;
 }
 
-/* ─── LIVE button ─────────────────────────────────────────────────────────── */
-
+/* LIVE button */
 .tr-live-btn {
   display: flex;
   align-items: center;
@@ -219,7 +204,6 @@
   color: #fff;
 }
 
-/* Active = currently watching live (bright red indicator) */
 .tr-live-btn--active {
   background: #e91916;
   color: #fff;
