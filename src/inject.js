@@ -13,7 +13,7 @@
   const GQL_URL = 'https://gql.twitch.tv/gql';
   const VOD_CHECK_INTERVAL = 30000;
   const SEEK_STEP = 10;
-  const MIN_REWIND_SEC = 10;
+  const MIN_REWIND_SEC = 15;
 
   // ─── State ──────────────────────────────────────────────────────────────────
   const state = {
@@ -393,7 +393,9 @@
     seekBar.max = '1000';
     seekBar.value = '1000';
     seekBar.addEventListener('input', () => {
-      const t = (seekBar.value / 1000) * streamElapsed();
+      const elapsed = streamElapsed();
+      const maxTime = elapsed - MIN_REWIND_SEC;
+      const t = Math.min((seekBar.value / 1000) * elapsed, maxTime);
       if (state.overlayVideo) state.overlayVideo.currentTime = t;
     });
     seekRow.appendChild(seekBar);
@@ -415,7 +417,7 @@
 
     const fwdBtn = mkBtn(
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.5 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg>`,
-      () => { video.currentTime = Math.min(streamElapsed(), video.currentTime + SEEK_STEP); },
+      () => { video.currentTime = Math.min(streamElapsed() - MIN_REWIND_SEC, video.currentTime + SEEK_STEP); },
     );
 
     const timeEl = document.createElement('span');
@@ -466,7 +468,7 @@
     overlay.addEventListener('keydown', (e) => {
       const handlers = {
         ArrowLeft: () => { video.currentTime = Math.max(0, video.currentTime - SEEK_STEP); },
-        ArrowRight: () => { video.currentTime = Math.min(streamElapsed(), video.currentTime + SEEK_STEP); },
+        ArrowRight: () => { video.currentTime = Math.min(streamElapsed() - MIN_REWIND_SEC, video.currentTime + SEEK_STEP); },
         ' ': () => { video.paused ? video.play() : video.pause(); },
         Escape: goLive,
         f: () => { document.fullscreenElement ? document.exitFullscreen() : overlay.requestFullscreen(); },
