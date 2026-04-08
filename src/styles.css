@@ -1,0 +1,233 @@
+/* Twitch Rewind — Injected Styles */
+
+/* ─── Rewind button in player controls ────────────────────────────────────── */
+
+.tr-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #efeff1;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.tr-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.tr-btn--active {
+  color: #9147ff;
+}
+
+.tr-btn--float {
+  position: absolute;
+  bottom: 60px;
+  right: 10px;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.6);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+}
+
+/* ─── Overlay ─────────────────────────────────────────────────────────────── */
+
+.tr-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: none;
+  flex-direction: column;
+  background: #000;
+}
+
+.tr-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+/* ─── Controls bar ────────────────────────────────────────────────────────── */
+
+.tr-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
+  padding: 20px 12px 8px;
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.tr-controls--visible {
+  opacity: 1;
+}
+
+.tr-overlay:hover .tr-controls {
+  opacity: 1;
+}
+
+/* Seek bar row */
+.tr-seek-row {
+  padding: 0 4px 6px;
+}
+
+.tr-seekbar {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.2);
+  outline: none;
+  cursor: pointer;
+  transition: height 0.1s;
+}
+
+.tr-seekbar:hover {
+  height: 6px;
+}
+
+.tr-seekbar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #9147ff;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.4);
+}
+
+/* Buttons row */
+.tr-btn-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tr-ctrl-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #efeff1;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tr-ctrl-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.tr-ctrl-btn svg {
+  width: 100%;
+  height: 100%;
+}
+
+.tr-time {
+  color: #efeff1;
+  font-size: 13px;
+  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  white-space: nowrap;
+  user-select: none;
+  padding: 0 4px;
+}
+
+.tr-behind {
+  color: #ff4d4d;
+  font-size: 12px;
+  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-weight: 600;
+  white-space: nowrap;
+  user-select: none;
+  padding: 0 4px;
+}
+
+/* Volume slider */
+.tr-volume {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 60px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.3);
+  outline: none;
+  cursor: pointer;
+}
+
+.tr-volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  border: none;
+}
+
+/* LIVE button */
+.tr-live-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  background: #9147ff;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.tr-live-btn:hover {
+  background: #772ce8;
+}
+
+/* ─── Notification toast ──────────────────────────────────────────────────── */
+
+.tr-notif {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 100;
+  padding: 10px 20px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #efeff1;
+  font-size: 14px;
+  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  pointer-events: none;
+  animation: tr-fade 4s ease-in-out;
+}
+
+@keyframes tr-fade {
+  0% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  10% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}

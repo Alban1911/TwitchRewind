@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 260px;
+      padding: 16px;
+      background: #18181b;
+      color: #efeff1;
+      font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      font-size: 14px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .header svg {
+      color: #9147ff;
+      flex-shrink: 0;
+    }
+    .header h1 {
+      font-size: 16px;
+      font-weight: 700;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0;
+    }
+    .label {
+      font-size: 13px;
+      color: #adadb8;
+    }
+    /* Toggle switch */
+    .toggle {
+      position: relative;
+      width: 40px;
+      height: 22px;
+    }
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .slider {
+      position: absolute;
+      inset: 0;
+      background: #3a3a3d;
+      border-radius: 11px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .slider::before {
+      content: '';
+      position: absolute;
+      width: 16px;
+      height: 16px;
+      left: 3px;
+      bottom: 3px;
+      background: #fff;
+      border-radius: 50%;
+      transition: transform 0.2s;
+    }
+    .toggle input:checked + .slider {
+      background: #9147ff;
+    }
+    .toggle input:checked + .slider::before {
+      transform: translateX(18px);
+    }
+    .hint {
+      margin-top: 12px;
+      font-size: 11px;
+      color: #757580;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+    <h1>Twitch Rewind</h1>
+  </div>
+  <div class="row">
+    <span class="label">Enable rewind</span>
+    <label class="toggle">
+      <input type="checkbox" id="toggle" checked>
+      <span class="slider"></span>
+    </label>
+  </div>
+  <div class="hint">
+    Click the rewind button on any live stream to seek backward.<br>
+    Requires the streamer to have VOD saving enabled.
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
