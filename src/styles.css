@@ -1,43 +1,44 @@
 /* Twitch Rewind — Injected Styles */
 
-/* ─── Rewind button in player controls ────────────────────────────────────── */
+/* ─── Persistent seek bar (always visible on live player) ─────────────────── */
 
-.tr-btn {
+.tr-persistent {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 35;
+  display: flex;
+  flex-direction: column;
+  padding: 0 10px 6px;
+  pointer-events: none;
+}
+
+.tr-persistent > * {
+  pointer-events: auto;
+}
+
+.tr-persistent-seekbar {
+  margin-bottom: 4px;
+}
+
+.tr-persistent-info {
   display: flex;
   align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
+  justify-content: space-between;
+  padding: 0 2px;
+}
+
+.tr-persistent-time {
   color: #efeff1;
-  cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  font-size: 12px;
+  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  white-space: nowrap;
+  user-select: none;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
 }
 
-.tr-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-}
-
-.tr-btn--active {
-  color: #9147ff;
-}
-
-.tr-btn--float {
-  position: absolute;
-  bottom: 60px;
-  right: 10px;
-  z-index: 50;
-  background: rgba(0, 0, 0, 0.6);
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-}
-
-/* ─── Overlay ─────────────────────────────────────────────────────────────── */
+/* ─── Overlay (VOD rewind mode) ───────────────────────────────────────────── */
 
 .tr-overlay {
   position: absolute;
@@ -55,7 +56,7 @@
   background: #000;
 }
 
-/* ─── Controls bar ────────────────────────────────────────────────────────── */
+/* ─── Overlay controls bar ────────────────────────────────────────────────── */
 
 .tr-controls {
   position: absolute;
@@ -82,6 +83,8 @@
 .tr-seek-row {
   padding: 0 4px 6px;
 }
+
+/* ─── Shared seek bar styling ─────────────────────────────────────────────── */
 
 .tr-seekbar {
   -webkit-appearance: none;
@@ -184,7 +187,8 @@
   border: none;
 }
 
-/* LIVE button */
+/* ─── LIVE button ─────────────────────────────────────────────────────────── */
+
 .tr-live-btn {
   display: flex;
   align-items: center;
@@ -192,19 +196,30 @@
   padding: 4px 10px;
   border: none;
   border-radius: 4px;
-  background: #9147ff;
-  color: #fff;
+  background: #53535f;
+  color: #adadb8;
   font-size: 12px;
   font-weight: 700;
   font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
 .tr-live-btn:hover {
-  background: #772ce8;
+  background: #636370;
+  color: #fff;
+}
+
+/* Active = currently watching live (bright red indicator) */
+.tr-live-btn--active {
+  background: #e91916;
+  color: #fff;
+}
+
+.tr-live-btn--active:hover {
+  background: #c41815;
 }
 
 /* ─── Notification toast ──────────────────────────────────────────────────── */

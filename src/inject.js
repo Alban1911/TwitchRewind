@@ -1,5 +1,9 @@
 // Twitch Rewind — Injected Page Script
 // Runs in the page context with access to Twitch internals.
+//
+// Two modes:
+//   LIVE  → native Twitch player, persistent seek bar visible
+//   REWIND → VOD overlay with full controls, seek bar triggers this
 
 (function () {
   'use strict';
@@ -9,6 +13,7 @@
   const GQL_URL = 'https://gql.twitch.tv/gql';
   const VOD_CHECK_INTERVAL = 30000;
   const SEEK_STEP = 10;
+  const MIN_REWIND_SEC = 10;
 
   // ─── State ──────────────────────────────────────────────────────────────────
   const state = {
@@ -77,7 +82,6 @@
     const edges = data?.data?.user?.videos?.edges;
     if (!edges?.length) return null;
     const vod = edges[0].node;
-    // Accept if created within the last 48 hours (covers long streams)
     const ageMs = Date.now() - new Date(vod.createdAt).getTime();
     return ageMs < 48 * 3600 * 1000 ? vod : null;
   }
@@ -122,23 +126,24 @@
 
   function twitchVideo() {
     const c = playerContainer();
-    return c ? c.querySelector('video') : null;
+    if (!c) return null;
+    // Skip our own overlay video
+    const videos = c.querySelectorAll('video:not(.tr-video)');
+    return videos[0] || null;
   }
 
-  function playerControls() {
-    return (
-      document.querySelector('.player-controls__right-control-group') ||
-      document.querySelector('[data-a-target="player-controls"]')
-    );
-  }
-
-  // ─── Rewind playback ───────────────────────────────────────────────────────
+  // ─── Rewind playback (VOD overlay) ─────────────────────────────────────────
 
   async function startRewind(seekTo) {
     if (!state.vodId) {
       notify('Rewind unavailable — streamer may not save VODs');
       return;
     }
+
+    // Enforce minimum rewind of 10 seconds from live
+    const elapsed = streamElapsed();
+    const maxSeek = elapsed - MIN_REWIND_SEC;
+    if (seekTo > maxSeek) seekTo = Math.max(0, maxSeek);
 
     log('Starting rewind → seek to', formatTime(seekTo));
 
@@ -151,7 +156,7 @@
 
       const url = vodPlaylistUrl(state.vodId, tok.value, tok.signature);
 
-      if (!state.overlayVideo) createOverlay();
+      if (!state.ui.overlay) createOverlay();
 
       if (state.hlsInstance) {
         state.hlsInstance.destroy();
@@ -181,7 +186,7 @@
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
             hls.startLoad();
           } else {
-            stopRewind();
+            goLive();
             notify('Playback error — try again');
           }
         }
@@ -191,7 +196,10 @@
       hls.attachMedia(state.overlayVideo);
 
       state.isRewinding = true;
-      showOverlay(true);
+
+      // Show overlay, hide native player visually
+      state.ui.overlay.style.display = 'flex';
+      state.ui.overlay.focus();
 
       // Mute original stream
       const orig = twitchVideo();
@@ -200,15 +208,18 @@
         orig.volume = 0;
       }
 
+      // Update seek bar to reflect rewind mode
+      updateLiveBtn(false);
       startSeekUpdates();
     } catch (err) {
       log('Rewind failed:', err);
       notify('Failed to start rewind');
-      stopRewind();
+      goLive();
     }
   }
 
-  function stopRewind() {
+  function goLive() {
+    log('Back to live');
     state.isRewinding = false;
 
     if (state.hlsInstance) {
@@ -216,24 +227,137 @@
       state.hlsInstance = null;
     }
 
+    // Restore original player audio
     const orig = twitchVideo();
     if (orig && orig._trSavedVolume !== undefined) {
       orig.volume = orig._trSavedVolume;
       delete orig._trSavedVolume;
     }
 
-    showOverlay(false);
+    // Hide overlay
+    if (state.ui.overlay) {
+      state.ui.overlay.style.display = 'none';
+    }
+
     stopSeekUpdates();
+    updateLiveBtn(true);
+
+    // Reset persistent seek bar to live position
+    if (state.ui.persistentSeekBar) {
+      state.ui.persistentSeekBar.value = 1000;
+    }
+    if (state.ui.persistentTime) {
+      const e = streamElapsed();
+      state.ui.persistentTime.textContent = formatTime(e);
+    }
   }
 
-  // ─── UI — Rewind button (kept for manual toggle if needed) ─────────────────
-
-  function removeRewindButton() {
-    document.getElementById('tr-btn')?.remove();
-    state.ui.btn = null;
+  function updateLiveBtn(isLive) {
+    if (state.ui.liveBtn) {
+      state.ui.liveBtn.classList.toggle('tr-live-btn--active', isLive);
+    }
   }
 
-  // ─── UI — Overlay ──────────────────────────────────────────────────────────
+  // ─── UI — Persistent seek bar (always visible on native player) ────────────
+
+  function addPersistentSeekBar() {
+    if (document.getElementById('tr-persistent')) return;
+
+    const container = playerContainer();
+    if (!container) return;
+
+    const wrapper = document.createElement('div');
+    wrapper.id = 'tr-persistent';
+    wrapper.className = 'tr-persistent';
+
+    // Seek bar
+    const seekBar = document.createElement('input');
+    seekBar.type = 'range';
+    seekBar.className = 'tr-seekbar tr-persistent-seekbar';
+    seekBar.min = '0';
+    seekBar.max = '1000';
+    seekBar.value = '1000';
+
+    // When user drags the seek bar, enter rewind mode
+    seekBar.addEventListener('change', () => {
+      const elapsed = streamElapsed();
+      const seekTo = (seekBar.value / 1000) * elapsed;
+      // If near live edge, go live instead
+      if (elapsed - seekTo < MIN_REWIND_SEC) {
+        if (state.isRewinding) goLive();
+        seekBar.value = 1000;
+        return;
+      }
+      startRewind(seekTo);
+    });
+
+    // Info row
+    const infoRow = document.createElement('div');
+    infoRow.className = 'tr-persistent-info';
+
+    const timeEl = document.createElement('span');
+    timeEl.className = 'tr-persistent-time';
+    timeEl.textContent = formatTime(streamElapsed());
+
+    const liveBtn = document.createElement('button');
+    liveBtn.className = 'tr-live-btn tr-live-btn--active';
+    liveBtn.textContent = 'LIVE';
+    liveBtn.addEventListener('click', () => {
+      if (state.isRewinding) goLive();
+    });
+
+    infoRow.appendChild(timeEl);
+    infoRow.appendChild(liveBtn);
+
+    wrapper.appendChild(seekBar);
+    wrapper.appendChild(infoRow);
+    container.appendChild(wrapper);
+
+    state.ui.persistentSeekBar = seekBar;
+    state.ui.persistentTime = timeEl;
+    state.ui.liveBtn = liveBtn;
+    state.ui.persistentWrapper = wrapper;
+
+    // Start updating the time display
+    startPersistentUpdates();
+  }
+
+  function removePersistentSeekBar() {
+    document.getElementById('tr-persistent')?.remove();
+    stopPersistentUpdates();
+    state.ui.persistentSeekBar = null;
+    state.ui.persistentTime = null;
+    state.ui.liveBtn = null;
+    state.ui.persistentWrapper = null;
+  }
+
+  let persistentInterval = null;
+
+  function startPersistentUpdates() {
+    stopPersistentUpdates();
+    persistentInterval = setInterval(updatePersistentBar, 1000);
+  }
+
+  function stopPersistentUpdates() {
+    clearInterval(persistentInterval);
+    persistentInterval = null;
+  }
+
+  function updatePersistentBar() {
+    const elapsed = streamElapsed();
+
+    // When in live mode, keep the bar at the right edge and show total time
+    if (!state.isRewinding) {
+      if (state.ui.persistentSeekBar && !state.ui.persistentSeekBar.matches(':active')) {
+        state.ui.persistentSeekBar.value = 1000;
+      }
+      if (state.ui.persistentTime) {
+        state.ui.persistentTime.textContent = formatTime(elapsed);
+      }
+    }
+  }
+
+  // ─── UI — VOD Overlay (only shown when rewinding) ─────────────────────────
 
   function createOverlay() {
     document.getElementById('tr-overlay')?.remove();
@@ -245,6 +369,7 @@
     overlay.id = 'tr-overlay';
     overlay.className = 'tr-overlay';
     overlay.tabIndex = 0;
+    overlay.style.display = 'none';
 
     // Video
     const video = document.createElement('video');
@@ -278,45 +403,34 @@
     const btnRow = document.createElement('div');
     btnRow.className = 'tr-btn-row';
 
-    // Play / Pause
     const playBtn = mkBtn(
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`,
-      () => {
-        if (video.paused) { video.play(); } else { video.pause(); }
-      },
+      () => { video.paused ? video.play() : video.pause(); },
     );
 
-    // Back 10s
     const backBtn = mkBtn(
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 5V1l-5 5 5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6h-2c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>`,
       () => { video.currentTime = Math.max(0, video.currentTime - SEEK_STEP); },
     );
 
-    // Forward 10s
     const fwdBtn = mkBtn(
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M11.5 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg>`,
       () => { video.currentTime = Math.min(streamElapsed(), video.currentTime + SEEK_STEP); },
     );
 
-    // Time display
     const timeEl = document.createElement('span');
     timeEl.className = 'tr-time';
     timeEl.textContent = '0:00 / 0:00';
 
-    // Spacer
     const spacer = document.createElement('div');
     spacer.style.flex = '1';
 
-    // Behind-live badge
     const behindEl = document.createElement('span');
     behindEl.className = 'tr-behind';
 
-    // Volume
     const volBtn = mkBtn(
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>`,
-      () => {
-        video.muted = !video.muted;
-      },
+      () => { video.muted = !video.muted; },
     );
 
     const volSlider = document.createElement('input');
@@ -330,13 +444,12 @@
       video.volume = parseFloat(volSlider.value);
     });
 
-    // LIVE button
-    const liveBtn = document.createElement('button');
-    liveBtn.className = 'tr-live-btn';
-    liveBtn.textContent = 'LIVE';
-    liveBtn.addEventListener('click', stopRewind);
+    // LIVE button inside overlay → go back to live
+    const overlayLiveBtn = document.createElement('button');
+    overlayLiveBtn.className = 'tr-live-btn';
+    overlayLiveBtn.textContent = 'LIVE';
+    overlayLiveBtn.addEventListener('click', goLive);
 
-    // Fullscreen
     const fsBtn = mkBtn(
       `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>`,
       () => {
@@ -345,7 +458,7 @@
       },
     );
 
-    btnRow.append(playBtn, backBtn, fwdBtn, timeEl, spacer, behindEl, volBtn, volSlider, liveBtn, fsBtn);
+    btnRow.append(playBtn, backBtn, fwdBtn, timeEl, spacer, behindEl, volBtn, volSlider, overlayLiveBtn, fsBtn);
     bar.appendChild(btnRow);
     overlay.appendChild(bar);
 
@@ -355,7 +468,7 @@
         ArrowLeft: () => { video.currentTime = Math.max(0, video.currentTime - SEEK_STEP); },
         ArrowRight: () => { video.currentTime = Math.min(streamElapsed(), video.currentTime + SEEK_STEP); },
         ' ': () => { video.paused ? video.play() : video.pause(); },
-        Escape: stopRewind,
+        Escape: goLive,
         f: () => { document.fullscreenElement ? document.exitFullscreen() : overlay.requestFullscreen(); },
       };
       if (handlers[e.key]) { handlers[e.key](); e.preventDefault(); }
@@ -363,7 +476,7 @@
 
     video.addEventListener('click', () => { video.paused ? video.play() : video.pause(); });
 
-    // Toggle controls visibility on mouse movement
+    // Toggle controls visibility
     let hideTimer;
     overlay.addEventListener('mousemove', () => {
       bar.classList.add('tr-controls--visible');
@@ -393,16 +506,6 @@
     return b;
   }
 
-  function showOverlay(visible) {
-    if (state.ui.overlay) {
-      state.ui.overlay.style.display = visible ? 'flex' : 'none';
-      if (visible) state.ui.overlay.focus();
-    }
-    if (state.ui.btn) {
-      state.ui.btn.classList.toggle('tr-btn--active', visible);
-    }
-  }
-
   function notify(msg) {
     const c = playerContainer();
     if (!c) return;
@@ -414,7 +517,7 @@
     setTimeout(() => el.remove(), 4000);
   }
 
-  // ─── Seek bar updates ──────────────────────────────────────────────────────
+  // ─── Seek bar updates (overlay) ────────────────────────────────────────────
 
   function startSeekUpdates() {
     stopSeekUpdates();
@@ -441,11 +544,18 @@
     if (state.ui.behindEl) {
       state.ui.behindEl.textContent = behind > 5 ? `-${formatTime(behind)}` : '';
     }
-    // Update play/pause icon
     if (state.ui.playBtn) {
       state.ui.playBtn.innerHTML = state.overlayVideo.paused
         ? `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`
         : `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
+    }
+
+    // Also sync the persistent seek bar position
+    if (state.ui.persistentSeekBar && !state.ui.persistentSeekBar.matches(':active')) {
+      state.ui.persistentSeekBar.value = total > 0 ? (cur / total) * 1000 : 1000;
+    }
+    if (state.ui.persistentTime) {
+      state.ui.persistentTime.textContent = `${formatTime(cur)} / ${formatTime(total)}`;
     }
   }
 
@@ -483,14 +593,11 @@
         state.vodId = vod.id;
         state.vodCreatedAt = vod.createdAt;
         log('VOD found:', vod.id);
-        // Auto-start rewind at the live position
-        if (!state.isRewinding) {
-          const elapsed = streamElapsed();
-          startRewind(Math.max(0, elapsed - 5));
-        }
+        addPersistentSeekBar();
       } else {
         state.vodId = null;
         state.vodCreatedAt = null;
+        removePersistentSeekBar();
       }
     } catch (e) {
       log('VOD check error:', e);
@@ -508,15 +615,13 @@
     });
   }
 
-  // ─── Event handlers ────────────────────────────────────────────────────────
-
   // ─── Cleanup ───────────────────────────────────────────────────────────────
 
   function cleanup() {
-    stopRewind();
+    if (state.isRewinding) goLive();
     clearInterval(state.vodCheckInterval);
     state.vodCheckInterval = null;
-    removeRewindButton();
+    removePersistentSeekBar();
     document.getElementById('tr-overlay')?.remove();
     state.channel = null;
     state.vodId = null;
