@@ -1,8 +1,7 @@
-/* Twitch Rewind — Native UI Integration */
-/* Controls are injected directly into Twitch's player controls */
+/* Twitch Rewind — Pixel-Perfect Native UI Integration */
+/* Matches Twitch's native player controls layout exactly */
 
-/* ─── VOD video (positioned over Twitch's native video) ──────────────────── */
-
+/* --- VOD video (positioned over Twitch's native video) --- */
 .tr-vod-video {
   position: absolute;
   inset: 0;
@@ -12,66 +11,125 @@
   background: #000;
 }
 
-/* ─── Seekbar area (injected above native button row) ────────────────────── */
-
+/* --- Seekbar area (injected above native button row) --- */
 .tr-seekbar-area {
-  padding: 0 10px 2px;
-}
-
-.tr-time-labels {
-  display: flex;
-  justify-content: space-between;
-  padding: 0 2px 3px;
-  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  color: #efeff1;
+  padding: 0 16px;
   user-select: none;
 }
 
+/* Top row: [elapsed time] ... [LIVE] */
+.tr-seekbar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+}
+
+.tr-elapsed {
+  font-family: Inter, 'Noto Sans Arabic', Roobert, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 400;
+  color: #fff;
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* LIVE label (text + skip-to-end icon, visible when rewinding) */
+.tr-live-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  color: #efeff1;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin: 0;
+  outline: none;
+  transition: background-color 0.1s ease;
+}
+
+.tr-live-label:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.tr-live-text {
+  font-family: Inter, 'Noto Sans Arabic', Roobert, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  color: #efeff1;
+  line-height: 1;
+}
+
+.tr-live-label svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  fill: currentColor;
+}
+
+/* Bottom row: [seekbar] [red dot] */
+.tr-seekbar-row {
+  display: flex;
+  align-items: center;
+  height: 20px;
+}
+
+/* --- Seekbar (matches native .seekbar-interaction-area) --- */
 .tr-seekbar {
   position: relative;
-  height: 16px;
+  flex: 1;
+  padding: 8px 0;
   display: flex;
   align-items: center;
   cursor: pointer;
-}
-
-.tr-seekbar-track {
-  position: absolute;
-  left: 0;
-  right: 0;
+  box-sizing: content-box;
   height: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.2);
-  transition: height 0.1s;
 }
 
+/* Track (matches native .seekbar-bar) */
+.tr-seekbar-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.35);
+  display: flex;
+  align-items: center;
+  transition: height 0.15s ease;
+}
+
+/* Track grows on hover */
 .tr-seekbar:hover .tr-seekbar-track,
 .tr-seekbar--active .tr-seekbar-track {
   height: 7px;
 }
 
+/* Played/filled portion (Twitch purple) */
 .tr-seekbar-played {
   position: absolute;
   left: 0;
   top: 0;
-  bottom: 0;
-  border-radius: 2px;
-  background: #a970ff;
+  height: 100%;
+  border-radius: 4px;
+  background: #9147ff;
   pointer-events: none;
+  transition: height 0.15s ease;
 }
 
+/* Scrubber thumb */
 .tr-seekbar-thumb {
   position: absolute;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
-  background: #a970ff;
+  background: #fff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.3);
   transform: translate(-50%, -50%);
   top: 50%;
   opacity: 0;
-  transition: opacity 0.1s;
+  transition: opacity 0.15s ease;
   pointer-events: none;
   z-index: 1;
 }
@@ -81,16 +139,18 @@
   opacity: 1;
 }
 
+/* Hover tooltip */
 .tr-seekbar-tooltip {
   position: absolute;
-  bottom: 18px;
+  bottom: 100%;
+  margin-bottom: 8px;
   transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.85);
+  background: rgba(0, 0, 0, 0.8);
   color: #efeff1;
-  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-family: Inter, 'Noto Sans Arabic', Roobert, 'Helvetica Neue', Helvetica, Arial, sans-serif;
   font-size: 13px;
-  font-weight: 600;
-  padding: 2px 6px;
+  font-weight: 700;
+  padding: 3px 6px;
   border-radius: 4px;
   white-space: nowrap;
   pointer-events: none;
@@ -102,23 +162,64 @@
   display: block;
 }
 
-/* ─── Buttons injected into native control groups ────────────────────────── */
+/* --- Red live dot (end of seekbar row) --- */
+.tr-live-dot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  margin-left: 6px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  flex-shrink: 0;
+}
 
+.tr-live-dot-indicator {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #eb0400;
+}
+
+@keyframes tr-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.tr-live-dot-indicator--pulse {
+  animation: tr-pulse 2s ease-in-out infinite;
+}
+
+/* --- Button wrapper (matches native InjectLayout wrapper) --- */
+.tr-btn-wrap {
+  display: flex;
+  align-items: center;
+  padding: 0;
+  margin: 0;
+  height: 32px;
+}
+
+/* --- Buttons injected into native control groups --- */
 .tr-native-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   padding: 0;
-  border: none;
-  border-radius: 4px;
+  border: 0;
+  border-radius: 9000px;
   background: transparent;
-  color: #efeff1;
+  color: #fff;
   cursor: pointer;
-  transition: background 0.1s, color 0.1s;
+  transition: background-color 0.1s ease, color 0.1s ease;
   flex-shrink: 0;
   vertical-align: middle;
+  position: relative;
 }
 
 .tr-native-btn:hover {
@@ -127,75 +228,58 @@
 }
 
 .tr-native-btn svg {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
 }
 
-/* ─── Time display ───────────────────────────────────────────────────────── */
+/* "10" text overlay for skip buttons */
+.tr-native-btn .tr-skip-text {
+  position: absolute;
+  font-family: Inter, 'Noto Sans Arabic', Roobert, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: 7px;
+  font-weight: 700;
+  line-height: 1;
+  color: currentColor;
+  pointer-events: none;
+  /* Center the "10" visually in the circular arrow area */
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin-top: 1px;
+}
 
+/* --- Time display (right control group) --- */
 .tr-time-display {
   color: #efeff1;
   font-size: 13px;
-  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  font-weight: 600;
+  font-family: Inter, 'Noto Sans Arabic', Roobert, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-weight: 700;
   white-space: nowrap;
   user-select: none;
-  padding: 0 6px;
-  line-height: 30px;
+  padding: 0 5px;
+  line-height: 32px;
+  display: flex;
+  align-items: center;
+  height: 32px;
 }
 
-/* ─── Behind indicator ───────────────────────────────────────────────────── */
-
+/* --- Behind indicator --- */
 .tr-behind {
   color: #f85149;
   font-size: 13px;
-  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-family: Inter, 'Noto Sans Arabic', Roobert, 'Helvetica Neue', Helvetica, Arial, sans-serif;
   font-weight: 700;
   white-space: nowrap;
   user-select: none;
   padding: 0 4px;
-  line-height: 30px;
-}
-
-/* ─── LIVE button ────────────────────────────────────────────────────────── */
-
-.tr-live-btn {
-  display: inline-flex;
+  line-height: 32px;
+  display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 0 8px;
-  height: 20px;
-  border: none;
-  border-radius: 4px;
-  background: #53535f;
-  color: #adadb8;
-  font-size: 13px;
-  font-weight: 700;
-  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  margin: 0 4px;
-  vertical-align: middle;
+  height: 32px;
 }
 
-.tr-live-btn:hover {
-  background: #636370;
-  color: #fff;
-}
-
-.tr-live-btn--active {
-  background: #e91916;
-  color: #fff;
-}
-
-.tr-live-btn--active:hover {
-  background: #c41815;
-}
-
-/* ─── Notification toast ──────────────────────────────────────────────────── */
-
+/* --- Notification toast --- */
 .tr-notif {
   position: absolute;
   top: 20px;
@@ -207,14 +291,14 @@
   background: rgba(0, 0, 0, 0.85);
   color: #efeff1;
   font-size: 14px;
-  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-family: Inter, 'Noto Sans Arabic', Roobert, 'Helvetica Neue', Helvetica, Arial, sans-serif;
   pointer-events: none;
   animation: tr-fade 4s ease-in-out;
 }
 
 @keyframes tr-fade {
-  0% { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+  0%  { opacity: 0; transform: translateX(-50%) translateY(-10px); }
   10% { opacity: 1; transform: translateX(-50%) translateY(0); }
   80% { opacity: 1; }
-  100% { opacity: 0; }
+  100%{ opacity: 0; }
 }

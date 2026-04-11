@@ -174,19 +174,46 @@
   // ─── SVG icons ──────────────────────────────────────────────────────────────
 
   const ICONS = {
-    play: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2.969V21.03a.5.5 0 0 0 .765.424L20.18 12.424a.5.5 0 0 0 0-.849L5.765 2.546A.5.5 0 0 0 5 2.97Z"/></svg>',
-    pause: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H5v16h5V4Zm9 0h-5v16h5V4Z"/></svg>',
-    skipBack: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 5V1l-5 5 5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6h-2c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>',
-    skipFwd: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M11.5 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z"/></svg>',
+    play: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2.969V21.03a.5.5 0 0 0 .765.424L20.18 12.424a.5.5 0 0 0 0-.849L5.765 2.546A.5.5 0 0 0 5 2.97Z"/></svg>',
+    pause: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H5v16h5V4Zm9 0h-5v16h5V4Z"/></svg>',
+    skipBack: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.5V1L8 5l4 4V6.5a5.5 5.5 0 1 1-5.5 5.5H5a7 7 0 1 0 7-7z"/></svg>',
+    skipFwd: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="transform:scaleX(-1)"><path d="M12 3.5V1L8 5l4 4V6.5a5.5 5.5 0 1 1-5.5 5.5H5a7 7 0 1 0 7-7z"/></svg>',
+    skipToEnd: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5.794 4.578 16 12 5.794 19.422A.5.5 0 0 1 5 19.018V4.982a.5.5 0 0 1 .794-.404ZM17 4h2v16h-2V4Z"/></svg>',
   };
 
   function mkBtn(icon, onClick, title) {
+    const wrap = document.createElement('div');
+    wrap.className = 'tr-btn-wrap';
+
     const b = document.createElement('button');
     b.className = 'tr-native-btn';
     b.innerHTML = icon;
     if (title) b.title = title;
+    b.setAttribute('aria-label', title || '');
     b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
-    return b;
+
+    wrap.appendChild(b);
+    return wrap;
+  }
+
+  function mkSkipBtn(direction, onClick, title) {
+    const wrap = document.createElement('div');
+    wrap.className = 'tr-btn-wrap';
+
+    const b = document.createElement('button');
+    b.className = 'tr-native-btn';
+    b.innerHTML = direction === 'back' ? ICONS.skipBack : ICONS.skipFwd;
+    if (title) b.title = title;
+    b.setAttribute('aria-label', title || '');
+
+    const textOverlay = document.createElement('span');
+    textOverlay.className = 'tr-skip-text';
+    textOverlay.textContent = '10';
+    b.appendChild(textOverlay);
+
+    b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
+    wrap.appendChild(b);
+    return wrap;
   }
 
   // ─── Quality switching (intercept Twitch's native quality menu) ─────────
@@ -236,6 +263,54 @@
     }, true);
   }
 
+  // ─── Speed control (intercept native speed menu + keyboard) ────────────
+
+  function hookSpeedMenu() {
+    // Intercept clicks on speed options in Twitch's settings
+    document.addEventListener('click', (e) => {
+      if (!state.isRewinding || !state.vodVideo) return;
+
+      // Speed submenu items
+      const item = e.target.closest('[data-a-target^="player-settings-submenu-speed-option"]') ||
+                   e.target.closest('[data-a-target="player-settings-menu-item-speed"]');
+      if (!item) return;
+
+      const text = item.textContent.trim().toLowerCase();
+      const match = text.match(/([\d.]+)\s*x/);
+      if (match) {
+        const rate = parseFloat(match[1]);
+        state.vodVideo.playbackRate = rate;
+        log('Speed →', rate + 'x');
+      }
+    }, true);
+  }
+
+  // ─── Copy URL at timestamp ────────────────────────────────────────────────
+
+  function hookCopyUrl() {
+    document.addEventListener('click', (e) => {
+      if (!state.isRewinding || !state.vodVideo || !state.vodId) return;
+
+      // Look for "Copy URL at..." menu item
+      const item = e.target.closest('[data-a-target="player-settings-menu-item-copy-url"]');
+      if (!item) return;
+
+      e.stopImmediatePropagation();
+      e.preventDefault();
+
+      const sec = Math.floor(state.vodVideo.currentTime);
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      const timestamp = `${h}h${m}m${s}s`;
+      const url = `https://www.twitch.tv/videos/${state.vodId}?t=${timestamp}`;
+
+      navigator.clipboard.writeText(url).then(() => {
+        log('Copied URL:', url);
+      }).catch(() => {});
+    }, true);
+  }
+
   function updatePlayPauseIcon() {
     const btn = document.querySelector('[data-a-target="player-play-pause-button"]');
     if (!btn || !state.isRewinding || !state.vodVideo) return;
@@ -251,56 +326,107 @@
   // ─── Inject controls into native Twitch UI ─────────────────────────────────
 
   function injectControls() {
-    // Remove any stale elements before re-injecting
     document.getElementById('tr-seekbar-area')?.remove();
     document.getElementById('tr-skip-back')?.remove();
     document.getElementById('tr-skip-fwd')?.remove();
     document.getElementById('tr-time')?.remove();
     document.getElementById('tr-behind')?.remove();
-    document.getElementById('tr-live-btn')?.remove();
 
     const controls = nativeControls();
     if (!controls) return;
 
-    // ── Seekbar (injected above the button row) ─────────────────────────────
+    // ── Seekbar area (above the button section) ──────────────────────────
     const seekArea = document.createElement('div');
     seekArea.id = 'tr-seekbar-area';
     seekArea.className = 'tr-seekbar-area';
 
-    const timeLabels = document.createElement('div');
-    timeLabels.className = 'tr-time-labels';
-    const curLabel = document.createElement('span');
+    // Top row: [elapsed time] ... [LIVE button]
+    const topRow = document.createElement('div');
+    topRow.className = 'tr-seekbar-top';
+
+    const curLabel = document.createElement('p');
+    curLabel.className = 'tr-elapsed';
     curLabel.textContent = formatTime(elapsed());
-    const durLabel = document.createElement('span');
-    durLabel.textContent = formatTime(elapsed());
-    timeLabels.append(curLabel, durLabel);
+
+    const liveLabel = document.createElement('div');
+    liveLabel.id = 'tr-live-label';
+    liveLabel.className = 'tr-live-label';
+    liveLabel.tabIndex = 0;
+    liveLabel.setAttribute('role', 'button');
+    liveLabel.setAttribute('aria-label', 'Skip to Live');
+
+    const liveText = document.createElement('span');
+    liveText.className = 'tr-live-text';
+    liveText.textContent = 'LIVE';
+
+    liveLabel.appendChild(liveText);
+
+    // Skip-to-end icon (native Twitch SVG, 20x20)
+    const skipSvgNS = 'http://www.w3.org/2000/svg';
+    const skipSvg = document.createElementNS(skipSvgNS, 'svg');
+    skipSvg.setAttribute('width', '20');
+    skipSvg.setAttribute('height', '20');
+    skipSvg.setAttribute('viewBox', '0 0 24 24');
+    skipSvg.setAttribute('fill', 'currentColor');
+    const skipPath = document.createElementNS(skipSvgNS, 'path');
+    skipPath.setAttribute('d', 'M5.794 4.578 16 12 5.794 19.422A.5.5 0 0 1 5 19.018V4.982a.5.5 0 0 1 .794-.404ZM17 4h2v16h-2V4Z');
+    skipSvg.appendChild(skipPath);
+    liveLabel.appendChild(skipSvg);
+
+    liveLabel.addEventListener('click', goLive);
+
+    topRow.append(curLabel, liveLabel);
+
+    // Bottom row: [=== seekbar track ===] [red dot]
+    const seekRow = document.createElement('div');
+    seekRow.className = 'tr-seekbar-row';
 
     const seekbar = document.createElement('div');
     seekbar.className = 'tr-seekbar';
+
     const seekTrack = document.createElement('div');
     seekTrack.className = 'tr-seekbar-track';
+
     const seekPlayed = document.createElement('span');
     seekPlayed.className = 'tr-seekbar-played';
     seekPlayed.style.width = '100%';
+
     const seekThumb = document.createElement('span');
     seekThumb.className = 'tr-seekbar-thumb';
     seekThumb.style.left = '100%';
+
     const seekTooltip = document.createElement('span');
     seekTooltip.className = 'tr-seekbar-tooltip';
 
     seekTrack.appendChild(seekPlayed);
     seekbar.append(seekTrack, seekThumb, seekTooltip);
-    seekArea.append(timeLabels, seekbar);
 
-    // Insert seekbar at the top of controls
-    const firstChild = controls.querySelector(':scope > div, :scope > section');
-    if (firstChild) {
-      controls.insertBefore(seekArea, firstChild);
+    // Red live dot at end of seekbar row
+    const liveDot = document.createElement('button');
+    liveDot.id = 'tr-live-dot';
+    liveDot.className = 'tr-live-dot';
+    liveDot.title = 'Jump to live';
+    liveDot.setAttribute('aria-label', 'Jump to live');
+    liveDot.innerHTML = '<span class="tr-live-dot-indicator"></span>';
+    liveDot.addEventListener('click', goLive);
+
+    seekRow.append(seekbar, liveDot);
+    seekArea.append(topRow, seekRow);
+
+    // Insert seekbar area before the section (button row)
+    const buttonSection = controls.querySelector(':scope > section');
+    if (buttonSection) {
+      controls.insertBefore(seekArea, buttonSection);
     } else {
-      controls.appendChild(seekArea);
+      const firstChild = controls.querySelector(':scope > div:last-of-type, :scope > section');
+      if (firstChild) {
+        controls.insertBefore(seekArea, firstChild);
+      } else {
+        controls.appendChild(seekArea);
+      }
     }
 
-    // Seekbar drag interaction
+    // ── Seekbar interaction (drag/hover) ─────────────────────────────────
     let seeking = false;
 
     function seekPctFromEvent(e) {
@@ -336,7 +462,7 @@
       if (seeking) { seeking = false; seekbar.classList.remove('tr-seekbar--active'); }
     });
 
-    // ── Intercept native play/pause when rewinding ────────────────────────
+    // ── Intercept native play/pause when rewinding ───────────────────────
     const playPauseBtn = document.querySelector('[data-a-target="player-play-pause-button"]');
     if (playPauseBtn) {
       playPauseBtn.addEventListener('click', (e) => {
@@ -353,42 +479,46 @@
       }, true);
     }
 
-    // ── Buttons injected into native left/right groups ──────────────────────
+    // ── Skip buttons (left control group) ────────────────────────────────
     const leftGroup = nativeLeftGroup();
     const rightGroup = nativeRightGroup();
 
-    // Skip back / forward (after play/pause in left group)
     if (leftGroup) {
-      const backBtn = mkBtn(ICONS.skipBack, () => {
+      const backWrap = mkSkipBtn('back', () => {
         if (state.isRewinding && state.vodVideo) {
           state.vodVideo.currentTime = Math.max(0, state.vodVideo.currentTime - SEEK_STEP);
         } else {
           startRewind(Math.max(0, elapsed() - MIN_REWIND_SEC - SEEK_STEP));
         }
       }, 'Back 10s');
-      backBtn.id = 'tr-skip-back';
+      backWrap.id = 'tr-skip-back';
 
-      const fwdBtn = mkBtn(ICONS.skipFwd, () => {
+      const fwdWrap = mkSkipBtn('forward', () => {
         if (state.isRewinding && state.vodVideo) {
           const max = elapsed() - MIN_REWIND_SEC;
           state.vodVideo.currentTime = Math.min(max, state.vodVideo.currentTime + SEEK_STEP);
         }
       }, 'Forward 10s');
-      fwdBtn.id = 'tr-skip-fwd';
+      fwdWrap.id = 'tr-skip-fwd';
 
-      // Insert after play/pause button
+      // Insert after the play/pause wrapper
       const playPauseWrap = leftGroup.querySelector('[data-a-target="player-play-pause-button"]')?.closest('.InjectLayout-sc-1i43xsx-0');
       if (playPauseWrap) {
-        playPauseWrap.after(backBtn, fwdBtn);
+        playPauseWrap.after(backWrap, fwdWrap);
       } else {
-        leftGroup.append(backBtn, fwdBtn);
+        const firstChild = leftGroup.children[0];
+        if (firstChild) {
+          firstChild.after(backWrap, fwdWrap);
+        } else {
+          leftGroup.append(backWrap, fwdWrap);
+        }
       }
 
-      state.ui.backBtn = backBtn;
-      state.ui.fwdBtn = fwdBtn;
+      state.ui.backBtn = backWrap;
+      state.ui.fwdBtn = fwdWrap;
     }
 
-    // Time display + behind indicator + LIVE button (in right group)
+    // ── Time + behind (right control group) ──────────────────────────────
     if (rightGroup) {
       const timeEl = document.createElement('span');
       timeEl.id = 'tr-time';
@@ -398,24 +528,12 @@
       behindEl.id = 'tr-behind';
       behindEl.className = 'tr-behind';
 
-      const liveBtn = document.createElement('button');
-      liveBtn.id = 'tr-live-btn';
-      liveBtn.className = state.isRewinding ? 'tr-live-btn' : 'tr-live-btn tr-live-btn--active';
-      liveBtn.textContent = 'LIVE';
-      liveBtn.addEventListener('click', goLive);
-
-      // Insert at the beginning of the right group
-      rightGroup.prepend(liveBtn, behindEl, timeEl);
-
-      state.ui.timeEl = timeEl;
-      state.ui.behindEl = behindEl;
-      state.ui.liveBtn = liveBtn;
+      rightGroup.prepend(behindEl, timeEl);
     }
 
     state.ui.seekArea = seekArea;
     state.ui.seekbar = { played: seekPlayed, thumb: seekThumb };
     state.ui.curLabel = curLabel;
-    state.ui.durLabel = durLabel;
 
     startSeekUpdates();
     log('Controls injected');
@@ -428,7 +546,6 @@
     document.getElementById('tr-skip-fwd')?.remove();
     document.getElementById('tr-time')?.remove();
     document.getElementById('tr-behind')?.remove();
-    document.getElementById('tr-live-btn')?.remove();
     state.ui = {};
   }
 
@@ -444,7 +561,6 @@
     reinjectObserver = new MutationObserver(() => {
       if (!state.vodId || reinjectPending) return;
       if (!document.getElementById('tr-seekbar-area') ||
-          !document.getElementById('tr-behind') ||
           !document.getElementById('tr-skip-back')) {
         reinjectPending = true;
         requestAnimationFrame(() => {
@@ -573,8 +689,7 @@
       state.vodVideo.play().catch(() => {});
       state.isRewinding = true;
       muteNative();
-      const lb = document.getElementById('tr-live-btn');
-      if (lb) lb.classList.remove('tr-live-btn--active');
+      // LIVE label is in seekbar area, no toggle needed
       updatePlayPauseIcon();
       return;
     }
@@ -627,8 +742,7 @@
       showVodVideo();
       state.isRewinding = true;
       muteNative();
-      const lb = document.getElementById('tr-live-btn');
-      if (lb) lb.classList.remove('tr-live-btn--active');
+      // LIVE label is in seekbar area, no toggle needed
     } catch (err) {
       log('Rewind failed:', err);
       goLive();
@@ -727,7 +841,10 @@
     state.isRewinding = false;
 
     // Pause and hide VOD video (keep HLS alive for instant re-rewind)
-    if (state.vodVideo) state.vodVideo.pause();
+    if (state.vodVideo) {
+      state.vodVideo.pause();
+      state.vodVideo.playbackRate = 1;
+    }
     hideVodVideo();
 
     unmuteNative();
@@ -743,8 +860,6 @@
       state.ui.seekbar.played.style.width = '100%';
       state.ui.seekbar.thumb.style.left = '100%';
     }
-    const liveBtn = document.getElementById('tr-live-btn');
-    if (liveBtn) liveBtn.classList.add('tr-live-btn--active');
     const behindEl = document.getElementById('tr-behind');
     if (behindEl) behindEl.textContent = '';
   }
@@ -771,7 +886,6 @@
     const behindEl = document.getElementById('tr-behind');
     const seekbar = state.ui.seekbar;
     const curLabel = state.ui.curLabel;
-    const durLabel = state.ui.durLabel;
 
     if (state.isRewinding && state.vodVideo) {
       const cur = state.vodVideo.currentTime;
@@ -783,7 +897,6 @@
         seekbar.thumb.style.left = pct + '%';
       }
       if (curLabel) curLabel.textContent = formatTime(cur);
-      if (durLabel) durLabel.textContent = formatTime(total);
       if (timeEl) timeEl.textContent = `${formatTime(cur)} / ${formatTime(total)}`;
       if (behindEl) {
         behindEl.textContent = behind > MIN_REWIND_SEC + 5 ? `-${formatTime(behind)}` : '';
@@ -794,7 +907,6 @@
         seekbar.thumb.style.left = '100%';
       }
       if (curLabel) curLabel.textContent = formatTime(total);
-      if (durLabel) durLabel.textContent = formatTime(total);
       if (timeEl) timeEl.textContent = formatTime(total);
       if (behindEl) behindEl.textContent = '';
     }
@@ -909,15 +1021,30 @@
 
   // ─── Keyboard shortcuts (global, when on a channel page) ───────────────────
 
+  const SPEED_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+
   document.addEventListener('keydown', (e) => {
     if (!state.vodId || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+    if (!state.isRewinding || !state.vodVideo) return;
 
-    if (e.key === 'ArrowLeft' && state.isRewinding && state.vodVideo) {
+    if (e.key === 'ArrowLeft') {
       state.vodVideo.currentTime = Math.max(0, state.vodVideo.currentTime - SEEK_STEP);
       e.preventDefault();
-    } else if (e.key === 'ArrowRight' && state.isRewinding && state.vodVideo) {
+    } else if (e.key === 'ArrowRight') {
       const max = elapsed() - MIN_REWIND_SEC;
       state.vodVideo.currentTime = Math.min(max, state.vodVideo.currentTime + SEEK_STEP);
+      e.preventDefault();
+    } else if (e.key === '>' || e.key === '.') {
+      // Speed up
+      const cur = state.vodVideo.playbackRate;
+      const next = SPEED_STEPS.find((s) => s > cur);
+      if (next) { state.vodVideo.playbackRate = next; log('Speed →', next + 'x'); }
+      e.preventDefault();
+    } else if (e.key === '<' || e.key === ',') {
+      // Slow down
+      const cur = state.vodVideo.playbackRate;
+      const prev = [...SPEED_STEPS].reverse().find((s) => s < cur);
+      if (prev) { state.vodVideo.playbackRate = prev; log('Speed →', prev + 'x'); }
       e.preventDefault();
     }
   });
@@ -929,6 +1056,8 @@
     hookNavigation();
     hookQualityMenu();
     hookVolumeSlider();
+    hookSpeedMenu();
+    hookCopyUrl();
     const ch = channelFromUrl();
     if (ch) onChannelChange(ch);
   }
