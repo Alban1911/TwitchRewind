@@ -65,14 +65,15 @@
 
   async function fetchCurrentVod(login) {
     const data = await gql({
-      query: `query($login:String!){user(login:$login){videos(first:1,sort:TIME,type:ARCHIVE){edges{node{id createdAt status}}}}}`,
+      query: `query($login:String!){user(login:$login){videos(first:5,sort:TIME,type:ARCHIVE){edges{node{id createdAt status}}}}}`,
       variables: { login },
     });
     const edges = data?.data?.user?.videos?.edges;
     if (!edges?.length) return null;
-    const vod = edges[0].node;
-    const ageMs = Date.now() - new Date(vod.createdAt).getTime();
-    return ageMs < 48 * 3600 * 1000 ? vod : null;
+    // Prefer the VOD currently being recorded (= current live stream)
+    const recording = edges.find((e) => e.node.status === 'RECORDING');
+    if (recording) return recording.node;
+    return null;
   }
 
   async function fetchVodToken(vodId) {
