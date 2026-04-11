@@ -1,9 +1,111 @@
-/* Twitch Rewind — Injected Styles */
+/* Twitch Rewind — Native UI Integration */
+/* Controls are injected directly into Twitch's player controls */
 
-/* ─── Rewind button in native Twitch controls ────────────────────────────── */
+/* ─── VOD video (positioned over Twitch's native video) ──────────────────── */
 
-.tr-btn {
+.tr-vod-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+/* ─── Seekbar area (injected above native button row) ────────────────────── */
+
+.tr-seekbar-area {
+  padding: 0 10px 2px;
+}
+
+.tr-time-labels {
   display: flex;
+  justify-content: space-between;
+  padding: 0 2px 3px;
+  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: #efeff1;
+  user-select: none;
+}
+
+.tr-seekbar {
+  position: relative;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+}
+
+.tr-seekbar-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.2);
+  transition: height 0.1s;
+}
+
+.tr-seekbar:hover .tr-seekbar-track,
+.tr-seekbar--active .tr-seekbar-track {
+  height: 7px;
+}
+
+.tr-seekbar-played {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 2px;
+  background: #a970ff;
+  pointer-events: none;
+}
+
+.tr-seekbar-thumb {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #a970ff;
+  transform: translate(-50%, -50%);
+  top: 50%;
+  opacity: 0;
+  transition: opacity 0.1s;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.tr-seekbar:hover .tr-seekbar-thumb,
+.tr-seekbar--active .tr-seekbar-thumb {
+  opacity: 1;
+}
+
+.tr-seekbar-tooltip {
+  position: absolute;
+  bottom: 18px;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.85);
+  color: #efeff1;
+  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+  pointer-events: none;
+  display: none;
+  user-select: none;
+}
+
+.tr-seekbar:hover .tr-seekbar-tooltip {
+  display: block;
+}
+
+/* ─── Buttons injected into native control groups ────────────────────────── */
+
+.tr-native-btn {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 30px;
@@ -14,189 +116,68 @@
   background: transparent;
   color: #efeff1;
   cursor: pointer;
-  transition: color 0.15s, background 0.15s;
+  transition: background 0.1s, color 0.1s;
+  flex-shrink: 0;
+  vertical-align: middle;
 }
 
-.tr-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+.tr-native-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
   color: #fff;
 }
 
-.tr-btn--float {
-  position: absolute;
-  bottom: 60px;
-  right: 10px;
-  z-index: 50;
-  background: rgba(0, 0, 0, 0.6);
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
+.tr-native-btn svg {
+  width: 20px;
+  height: 20px;
 }
 
-/* ─── Overlay (VOD rewind mode) ───────────────────────────────────────────── */
+/* ─── Time display ───────────────────────────────────────────────────────── */
 
-.tr-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 40;
-  display: none;
-  flex-direction: column;
-  background: #000;
-}
-
-.tr-video {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  background: #000;
-}
-
-/* ─── Controls bar ────────────────────────────────────────────────────────── */
-
-.tr-controls {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  display: flex;
-  flex-direction: column;
-  background: linear-gradient(transparent, rgba(0, 0, 0, 0.85));
-  padding: 20px 12px 8px;
-  opacity: 0;
-  transition: opacity 0.25s;
-}
-
-.tr-controls--visible {
-  opacity: 1;
-}
-
-.tr-overlay:hover .tr-controls {
-  opacity: 1;
-}
-
-/* Seek bar */
-.tr-seek-row {
-  padding: 0 4px 6px;
-}
-
-.tr-seekbar {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 100%;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.2);
-  outline: none;
-  cursor: pointer;
-  transition: height 0.1s;
-}
-
-.tr-seekbar:hover {
-  height: 6px;
-}
-
-.tr-seekbar::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #9147ff;
-  cursor: pointer;
-  border: none;
-  box-shadow: 0 0 4px rgba(0, 0, 0, 0.4);
-}
-
-/* Buttons row */
-.tr-btn-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.tr-ctrl-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  padding: 6px;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: #efeff1;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.tr-ctrl-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.tr-ctrl-btn svg {
-  width: 100%;
-  height: 100%;
-}
-
-.tr-time {
+.tr-time-display {
   color: #efeff1;
   font-size: 13px;
-  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  white-space: nowrap;
-  user-select: none;
-  padding: 0 4px;
-}
-
-.tr-behind {
-  color: #ff4d4d;
-  font-size: 12px;
   font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   font-weight: 600;
   white-space: nowrap;
   user-select: none;
+  padding: 0 6px;
+  line-height: 30px;
+}
+
+/* ─── Behind indicator ───────────────────────────────────────────────────── */
+
+.tr-behind {
+  color: #f85149;
+  font-size: 13px;
+  font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-weight: 700;
+  white-space: nowrap;
+  user-select: none;
   padding: 0 4px;
+  line-height: 30px;
 }
 
-/* Volume */
-.tr-volume {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 60px;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.3);
-  outline: none;
-  cursor: pointer;
-}
+/* ─── LIVE button ────────────────────────────────────────────────────────── */
 
-.tr-volume::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: #fff;
-  cursor: pointer;
-  border: none;
-}
-
-/* LIVE button */
 .tr-live-btn {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
+  justify-content: center;
+  padding: 0 8px;
+  height: 20px;
   border: none;
   border-radius: 4px;
   background: #53535f;
   color: #adadb8;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   font-family: 'Roobert', 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.02em;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
+  margin: 0 4px;
+  vertical-align: middle;
 }
 
 .tr-live-btn:hover {
