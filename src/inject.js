@@ -63,6 +63,16 @@
     return res.json();
   }
 
+  async function isSubscribed(login) {
+    try {
+      const data = await gql({
+        query: `query($login:String!){user(login:$login){self{subscriptionBenefit{id}}}}`,
+        variables: { login },
+      });
+      return !!data?.data?.user?.self?.subscriptionBenefit?.id;
+    } catch (_) { return false; }
+  }
+
   async function fetchCurrentVod(login) {
     const data = await gql({
       query: `query($login:String!){user(login:$login){videos(first:5,sort:TIME,type:ARCHIVE){edges{node{id createdAt status}}}}}`,
@@ -819,6 +829,12 @@
   async function checkVod() {
     if (!state.channel) return;
     try {
+      // Skip if user is subscribed — they have native VOD access
+      if (await isSubscribed(state.channel)) {
+        log('Subscribed to channel, skipping rewind');
+        return;
+      }
+
       const vod = await fetchCurrentVod(state.channel);
       if (vod) {
         state.vodId = vod.id;
