@@ -556,6 +556,7 @@
 
     // If pre-loaded, instant rewind
     if (state.hlsReady && state.hlsInstance && state.vodVideo) {
+      syncVodVolume();
       state.vodVideo.currentTime = seekTo;
       showVodVideo();
       state.vodVideo.play().catch(() => {});
@@ -596,6 +597,7 @@
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         state.hlsReady = true;
         log('VOD manifest loaded');
+        syncVodVolume();
         video.play().catch(() => {});
         updatePlayPauseIcon();
       });
@@ -619,6 +621,38 @@
     } catch (err) {
       log('Rewind failed:', err);
       goLive();
+    }
+  }
+
+  // ─── Volume sync (match VOD volume to native) ─────────────────────────────
+
+  function syncVodVolume() {
+    if (!state.vodVideo) return;
+    const nv = twitchVideo();
+    const vol = nv?._trSavedVolume ?? nv?.volume ?? 1;
+    state.vodVideo.volume = vol;
+    state.vodVideo.muted = nv?.muted ?? false;
+  }
+
+  function hookVolumeSlider() {
+    // Intercept Twitch's volume slider to control VOD video during rewind
+    document.addEventListener('input', (e) => {
+      if (!state.isRewinding || !state.vodVideo) return;
+      const slider = e.target.closest('[data-a-target="player-volume-slider"]');
+      if (!slider) return;
+      state.vodVideo.volume = parseFloat(slider.value);
+    }, true);
+
+    // Intercept mute/unmute button
+    const muteBtn = document.querySelector('[data-a-target="player-mute-unmute-button"]');
+    if (muteBtn) {
+      muteBtn.addEventListener('click', () => {
+        if (!state.isRewinding || !state.vodVideo) return;
+        // Toggle after Twitch processes it — use a microtask
+        queueMicrotask(() => {
+          state.vodVideo.muted = !state.vodVideo.muted;
+        });
+      }, true);
     }
   }
 
@@ -877,6 +911,7 @@
     log('Loaded');
     hookNavigation();
     hookQualityMenu();
+    hookVolumeSlider();
     const ch = channelFromUrl();
     if (ch) onChannelChange(ch);
   }
