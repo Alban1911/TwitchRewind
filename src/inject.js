@@ -178,6 +178,18 @@
     return b;
   }
 
+  function updatePlayPauseIcon() {
+    const btn = document.querySelector('[data-a-target="player-play-pause-button"]');
+    if (!btn || !state.isRewinding || !state.vodVideo) return;
+    const svg = btn.querySelector('svg');
+    if (!svg) return;
+    const paused = state.vodVideo.paused;
+    svg.innerHTML = paused
+      ? '<path d="M5 2.969V21.03a.5.5 0 0 0 .765.424L20.18 12.424a.5.5 0 0 0 0-.849L5.765 2.546A.5.5 0 0 0 5 2.97Z"></path>'
+      : '<path d="M10 4H5v16h5V4Zm9 0h-5v16h5V4Z"></path>';
+    btn.setAttribute('aria-label', paused ? 'Play' : 'Pause');
+  }
+
   // ─── Inject controls into native Twitch UI ─────────────────────────────────
 
   function injectControls() {
@@ -265,6 +277,23 @@
     document.addEventListener('mouseup', () => {
       if (seeking) { seeking = false; seekbar.classList.remove('tr-seekbar--active'); }
     });
+
+    // ── Intercept native play/pause when rewinding ────────────────────────
+    const playPauseBtn = document.querySelector('[data-a-target="player-play-pause-button"]');
+    if (playPauseBtn) {
+      playPauseBtn.addEventListener('click', (e) => {
+        if (state.isRewinding && state.vodVideo) {
+          e.stopImmediatePropagation();
+          e.preventDefault();
+          if (state.vodVideo.paused) {
+            state.vodVideo.play();
+          } else {
+            state.vodVideo.pause();
+          }
+          updatePlayPauseIcon();
+        }
+      }, true);
+    }
 
     // ── Buttons injected into native left/right groups ──────────────────────
     const leftGroup = nativeLeftGroup();
@@ -381,7 +410,10 @@
     video.playsInline = true;
     video.style.display = 'none';
 
-    video.addEventListener('click', () => { video.paused ? video.play() : video.pause(); });
+    video.addEventListener('click', () => {
+      video.paused ? video.play() : video.pause();
+      updatePlayPauseIcon();
+    });
 
     const videoRef = container.querySelector('.video-ref, [data-a-target="video-ref"]');
     if (videoRef) {
