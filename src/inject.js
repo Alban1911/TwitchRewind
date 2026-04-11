@@ -389,7 +389,7 @@
 
       const liveBtn = document.createElement('button');
       liveBtn.id = 'tr-live-btn';
-      liveBtn.className = 'tr-live-btn tr-live-btn--active';
+      liveBtn.className = state.isRewinding ? 'tr-live-btn' : 'tr-live-btn tr-live-btn--active';
       liveBtn.textContent = 'LIVE';
       liveBtn.addEventListener('click', goLive);
 
