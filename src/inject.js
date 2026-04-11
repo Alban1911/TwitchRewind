@@ -178,6 +178,53 @@
     return b;
   }
 
+  // ─── Quality switching (intercept Twitch's native quality menu) ─────────
+
+  function hookQualityMenu() {
+    // Intercept clicks on quality options in Twitch's settings panel
+    document.addEventListener('click', (e) => {
+      if (!state.isRewinding || !state.hlsInstance) return;
+
+      // Twitch quality items are inside the settings menu
+      const item = e.target.closest('[data-a-target="player-settings-menu-item-quality"]') ||
+                   e.target.closest('[data-a-target^="player-settings-submenu-quality-option"]');
+      if (!item) return;
+
+      const text = item.textContent.trim().toLowerCase();
+      const hls = state.hlsInstance;
+      const levels = hls.levels;
+      if (!levels || !levels.length) return;
+
+      // "auto" → automatic quality
+      if (text.includes('auto')) {
+        hls.currentLevel = -1;
+        log('Quality → Auto');
+        return;
+      }
+
+      // Parse resolution from text like "1080p60", "720p60 (Source)", "480p30"
+      const match = text.match(/(\d{3,4})p/);
+      if (!match) return;
+      const targetHeight = parseInt(match[1], 10);
+
+      // Find matching HLS level by height
+      let bestIdx = -1;
+      for (let i = 0; i < levels.length; i++) {
+        if (levels[i].height === targetHeight) { bestIdx = i; break; }
+      }
+
+      // If "source" in text, pick highest quality
+      if (bestIdx === -1 && text.includes('source')) {
+        bestIdx = 0; // levels[0] is typically the highest quality
+      }
+
+      if (bestIdx !== -1) {
+        hls.currentLevel = bestIdx;
+        log('Quality →', levels[bestIdx].height + 'p @', Math.round(levels[bestIdx].bitrate / 1000) + 'kbps');
+      }
+    }, true);
+  }
+
   function updatePlayPauseIcon() {
     const btn = document.querySelector('[data-a-target="player-play-pause-button"]');
     if (!btn || !state.isRewinding || !state.vodVideo) return;
@@ -783,6 +830,7 @@
   function init() {
     log('Loaded');
     hookNavigation();
+    hookQualityMenu();
     const ch = channelFromUrl();
     if (ch) onChannelChange(ch);
   }
