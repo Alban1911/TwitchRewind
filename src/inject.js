@@ -552,21 +552,13 @@
       return;
     }
 
-    // Capture current play/pause state before switching
-    const nativeVid = twitchVideo();
-    const wasPaused = nativeVid ? nativeVid.paused : false;
-
     log('Rewind → seek to', formatTime(seekTo));
 
     // If pre-loaded, instant rewind
     if (state.hlsReady && state.hlsInstance && state.vodVideo) {
       state.vodVideo.currentTime = seekTo;
       showVodVideo();
-      if (wasPaused) {
-        state.vodVideo.pause();
-      } else {
-        state.vodVideo.play().catch(() => {});
-      }
+      state.vodVideo.play().catch(() => {});
       state.isRewinding = true;
       muteNative();
       const lb = document.getElementById('tr-live-btn');
@@ -604,11 +596,7 @@
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         state.hlsReady = true;
         log('VOD manifest loaded');
-        if (wasPaused) {
-          video.pause();
-        } else {
-          video.play().catch(() => {});
-        }
+        video.play().catch(() => {});
         updatePlayPauseIcon();
       });
 
@@ -691,7 +679,6 @@
 
   function goLive() {
     log('Back to live');
-    const wasPaused = state.vodVideo ? state.vodVideo.paused : false;
     state.isRewinding = false;
 
     // Pause and hide VOD video (keep HLS alive for instant re-rewind)
@@ -700,17 +687,11 @@
 
     unmuteNative();
 
-    // Preserve pause state on native player
-    if (wasPaused) {
-      // Small delay to let unmute settle before pausing
-      requestAnimationFrame(() => {
-        const nv = twitchVideo();
-        if (nv) nv.pause();
-        updatePlayPauseIcon();
-      });
-    } else {
-      updatePlayPauseIcon();
-    }
+    // Always resume native playback
+    requestAnimationFrame(() => {
+      const nv = twitchVideo();
+      if (nv && nv.paused) nv.play().catch(() => {});
+    });
 
     // Reset seekbar to live edge
     if (state.ui.seekbar) {
