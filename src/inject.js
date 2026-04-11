@@ -181,7 +181,14 @@
   // ─── Inject controls into native Twitch UI ─────────────────────────────────
 
   function injectControls() {
-    if (document.getElementById('tr-seekbar-area')) return;
+    // Remove any stale elements before re-injecting
+    document.getElementById('tr-seekbar-area')?.remove();
+    document.getElementById('tr-skip-back')?.remove();
+    document.getElementById('tr-skip-fwd')?.remove();
+    document.getElementById('tr-time')?.remove();
+    document.getElementById('tr-behind')?.remove();
+    document.getElementById('tr-live-btn')?.remove();
+
     const controls = nativeControls();
     if (!controls) return;
 
@@ -341,16 +348,25 @@
   // Re-inject controls if Twitch re-renders (React)
   let reinjectObserver;
 
+  let reinjectPending = false;
+
   function watchForReinject() {
     reinjectObserver?.disconnect();
-    const controls = nativeControls();
-    if (!controls) return;
+    const container = playerContainer();
+    if (!container) return;
     reinjectObserver = new MutationObserver(() => {
-      if (!document.getElementById('tr-seekbar-area') && state.vodId) {
-        injectControls();
+      if (!state.vodId || reinjectPending) return;
+      if (!document.getElementById('tr-seekbar-area') ||
+          !document.getElementById('tr-behind') ||
+          !document.getElementById('tr-skip-back')) {
+        reinjectPending = true;
+        requestAnimationFrame(() => {
+          injectControls();
+          reinjectPending = false;
+        });
       }
     });
-    reinjectObserver.observe(controls, { childList: true, subtree: true });
+    reinjectObserver.observe(container, { childList: true, subtree: true });
   }
 
   // ─── VOD video element (sits above native video, below controls) ────────
@@ -467,7 +483,8 @@
       state.vodVideo.play().catch(() => {});
       state.isRewinding = true;
       muteNative();
-      if (state.ui.liveBtn) state.ui.liveBtn.classList.remove('tr-live-btn--active');
+      const lb = document.getElementById('tr-live-btn');
+      if (lb) lb.classList.remove('tr-live-btn--active');
       return;
     }
 
@@ -517,7 +534,8 @@
       showVodVideo();
       state.isRewinding = true;
       muteNative();
-      if (state.ui.liveBtn) state.ui.liveBtn.classList.remove('tr-live-btn--active');
+      const lb = document.getElementById('tr-live-btn');
+      if (lb) lb.classList.remove('tr-live-btn--active');
     } catch (err) {
       log('Rewind failed:', err);
       goLive();
@@ -555,8 +573,10 @@
       state.ui.seekbar.played.style.width = '100%';
       state.ui.seekbar.thumb.style.left = '100%';
     }
-    if (state.ui.liveBtn) state.ui.liveBtn.classList.add('tr-live-btn--active');
-    if (state.ui.behindEl) state.ui.behindEl.textContent = '';
+    const liveBtn = document.getElementById('tr-live-btn');
+    if (liveBtn) liveBtn.classList.add('tr-live-btn--active');
+    const behindEl = document.getElementById('tr-behind');
+    if (behindEl) behindEl.textContent = '';
   }
 
   // ─── Seek updates ──────────────────────────────────────────────────────────
@@ -575,31 +595,38 @@
     const total = elapsed();
     if (total <= 0) return;
 
+    // Use getElementById for elements injected into Twitch's control groups
+    // (React can re-render and replace them, making cached refs stale)
+    const timeEl = document.getElementById('tr-time');
+    const behindEl = document.getElementById('tr-behind');
+    const seekbar = state.ui.seekbar;
+    const curLabel = state.ui.curLabel;
+    const durLabel = state.ui.durLabel;
+
     if (state.isRewinding && state.vodVideo) {
       const cur = state.vodVideo.currentTime;
       const pct = (cur / total) * 100;
       const behind = Math.max(0, total - cur);
 
-      if (state.ui.seekbar) {
-        state.ui.seekbar.played.style.width = pct + '%';
-        state.ui.seekbar.thumb.style.left = pct + '%';
+      if (seekbar) {
+        seekbar.played.style.width = pct + '%';
+        seekbar.thumb.style.left = pct + '%';
       }
-      if (state.ui.curLabel) state.ui.curLabel.textContent = formatTime(cur);
-      if (state.ui.durLabel) state.ui.durLabel.textContent = formatTime(total);
-      if (state.ui.timeEl) state.ui.timeEl.textContent = `${formatTime(cur)} / ${formatTime(total)}`;
-      if (state.ui.behindEl) {
-        state.ui.behindEl.textContent = behind > MIN_REWIND_SEC + 5 ? `-${formatTime(behind)}` : '';
+      if (curLabel) curLabel.textContent = formatTime(cur);
+      if (durLabel) durLabel.textContent = formatTime(total);
+      if (timeEl) timeEl.textContent = `${formatTime(cur)} / ${formatTime(total)}`;
+      if (behindEl) {
+        behindEl.textContent = behind > MIN_REWIND_SEC + 5 ? `-${formatTime(behind)}` : '';
       }
     } else {
-      // Live mode — seekbar at 100%
-      if (state.ui.seekbar) {
-        state.ui.seekbar.played.style.width = '100%';
-        state.ui.seekbar.thumb.style.left = '100%';
+      if (seekbar) {
+        seekbar.played.style.width = '100%';
+        seekbar.thumb.style.left = '100%';
       }
-      if (state.ui.curLabel) state.ui.curLabel.textContent = formatTime(total);
-      if (state.ui.durLabel) state.ui.durLabel.textContent = formatTime(total);
-      if (state.ui.timeEl) state.ui.timeEl.textContent = formatTime(total);
-      if (state.ui.behindEl) state.ui.behindEl.textContent = '';
+      if (curLabel) curLabel.textContent = formatTime(total);
+      if (durLabel) durLabel.textContent = formatTime(total);
+      if (timeEl) timeEl.textContent = formatTime(total);
+      if (behindEl) behindEl.textContent = '';
     }
   }
 
