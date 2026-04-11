@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Twitch Rewind",
   "version": "1.0.0",
-  "description": "Unlock stream rewind on any Twitch live channel",
+  "description": "Rewind any Twitch live stream and unlock subscriber-only VODs",
   "permissions": ["storage"],
   "host_permissions": ["*://*.twitch.tv/*"],
   "content_scripts": [
@@ -10,7 +10,7 @@
       "matches": ["*://*.twitch.tv/*"],
       "js": ["src/content.js"],
       "css": ["src/styles.css"],
-      "run_at": "document_idle"
+      "run_at": "document_start"
     }
   ],
   "background": {
@@ -26,7 +26,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["src/inject.js", "lib/hls.min.js"],
+      "resources": ["src/inject.js", "src/vod-unlock.js", "lib/hls.min.js"],
       "matches": ["*://*.twitch.tv/*"]
     }
   ],

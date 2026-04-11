@@ -1,33 +1,37 @@
 // Twitch Rewind — Content Script
-// Bridges the extension context and the page context.
+// Runs at document_start. Injects vod-unlock.js immediately (before Twitch scripts),
+// then injects hls.js + inject.js after DOM is ready.
 
 (function () {
   'use strict';
 
+  // Inject into the page's MAIN world via <script> tag
   function injectScript(src) {
     return new Promise((resolve) => {
-      const script = document.createElement('script');
-      script.src = chrome.runtime.getURL(src);
-      script.onload = () => {
-        script.remove();
+      const s = document.createElement('script');
+      s.src = chrome.runtime.getURL(src);
+      s.onload = () => {
+        s.remove();
         resolve();
       };
-      (document.head || document.documentElement).appendChild(script);
+      (document.head || document.documentElement).appendChild(s);
     });
   }
 
-  async function init() {
-    // Inject hls.js first, then our main script
+  // Inject VOD unlock ASAP (before Twitch creates its player worker)
+  injectScript('src/vod-unlock.js');
+
+  // Inject rewind scripts after DOM is ready
+  async function initRewind() {
     await injectScript('lib/hls.min.js');
     await injectScript('src/inject.js');
 
-    // Get initial state and forward to page
     chrome.runtime.sendMessage({ type: 'GET_STATE' }, (response) => {
       if (response) {
-        window.postMessage({
-          type: 'TWITCH_REWIND_TOGGLE',
-          enabled: response.enabled,
-        }, '*');
+        window.postMessage(
+          { type: 'TWITCH_REWIND_TOGGLE', enabled: response.enabled },
+          '*',
+        );
       }
     });
   }
@@ -35,12 +39,16 @@
   // Listen for state changes from background
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg.type === 'STATE_CHANGED') {
-      window.postMessage({
-        type: 'TWITCH_REWIND_TOGGLE',
-        enabled: msg.enabled,
-      }, '*');
+      window.postMessage(
+        { type: 'TWITCH_REWIND_TOGGLE', enabled: msg.enabled },
+        '*',
+      );
     }
   });
 
-  init();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initRewind);
+  } else {
+    initRewind();
+  }
 })();
