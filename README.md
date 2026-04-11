@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>Rewind any live Twitch stream and unlock sub-only VODs.</strong><br>
-  A lightweight Chrome extension that lets you seek backward on live streams using the channel's VOD, and automatically unlocks subscriber-only VODs — no subscription needed.
+  A lightweight Chrome extension that adds a seekbar to live streams, lets you rewind using the channel's VOD, and automatically unlocks subscriber-only VODs — no subscription needed.
 </p>
 
 <p align="center">
@@ -19,10 +19,12 @@
 
 ## Features
 
-- **One-click rewind** — A rewind button appears in the native Twitch player controls. Click it to jump back in the stream.
-- **Full playback controls** — Seek bar, play/pause, skip forward/back (10s), volume, fullscreen, and keyboard shortcuts.
-- **Return to live** — Press the LIVE button or hit `Escape` to instantly return to the live broadcast.
+- **Native UI integration** — A seekbar, skip buttons, time display, and LIVE button are injected directly into Twitch's native player controls. No separate overlay — it looks and feels like part of Twitch.
+- **Instant rewind** — The VOD is pre-loaded in the background so rewinding is nearly instant when you drag the seekbar backward.
 - **Sub-only VOD unlock** — Automatically unlocks subscriber-only VODs so you can watch them without subscribing. Works on both live rewind and VOD pages.
+- **Volume sync** — Volume and mute state are synced between the live stream and the rewind playback. Twitch's native volume slider and mute button control the rewind video.
+- **Quality switching** — Twitch's native quality selector controls the rewind video quality.
+- **Smart subscription detection** — Automatically disabled on channels you're subscribed to, since you already have native VOD access.
 - **SPA-aware** — Detects channel changes as you navigate Twitch without full page reloads.
 - **Minimal footprint** — No external dependencies beyond [hls.js](https://github.com/video-dev/hls.js) for HLS playback. No tracking, no analytics.
 
@@ -43,30 +45,28 @@
 
 ### Rewinding a stream
 
-1. Go to any **live** Twitch channel
-2. A **rewind button** (circular arrow icon) appears in the player's bottom-right control bar
-3. **Click the rewind button** — the extension loads the channel's VOD and seeks to where the stream currently is (minus a small buffer)
-4. Use the **custom controls** to navigate:
+1. Go to any **live** Twitch channel (where you're not subscribed)
+2. A **seekbar** with time labels appears in the native player controls, along with **skip back/forward** buttons
+3. **Drag the seekbar backward** to any point in the stream — the VOD loads and plays from that position
+4. Use the native Twitch controls as usual:
 
 | Control | Action |
 |---|---|
-| Seek bar | Drag to any point in the stream |
-| Play / Pause | Toggle playback (or click the video) |
-| Skip back | Jump 10 seconds backward |
-| Skip forward | Jump 10 seconds forward |
-| Volume | Adjust with slider or mute toggle |
+| Seekbar | Drag to any point in the stream |
+| Play / Pause | Toggle playback (native Twitch button) |
+| Skip back / forward | Jump 10 seconds (injected buttons) |
+| Volume slider | Adjusts rewind volume (native Twitch slider) |
+| Quality selector | Changes rewind video quality (native Twitch menu) |
 | LIVE | Return to the live broadcast |
-| Fullscreen | Enter/exit fullscreen |
 
-### Keyboard shortcuts (while in rewind mode)
+### Keyboard shortcuts
 
 | Key | Action |
 |---|---|
-| `Space` | Play / Pause |
+| `Space` / `K` | Play / Pause |
 | `Left Arrow` | Seek back 10s |
 | `Right Arrow` | Seek forward 10s |
-| `F` | Toggle fullscreen |
-| `Escape` | Return to live |
+| `M` | Mute / Unmute |
 
 ### Enable / Disable
 
@@ -81,12 +81,12 @@ Twitch Rewind works by playing back the channel's VOD (Video on Demand) alongsid
 ```
 manifest.json          Chrome Extension manifest (Manifest V3)
 src/
-  vod-unlock.js        MAIN world script — patches fetch/Worker for sub-only VOD bypass
+  vod-unlock.js        Worker patch — intercepts fetch for sub-only VOD bypass
+  content.js           Content script — injects scripts at document_start
+  inject.js            Page script — core logic (VOD detection, playback, native UI injection)
   background.js        Service worker — manages enable/disable state
-  content.js           Content script — injects hls.js and the main script into the page
-  inject.js            Page script — all core logic (VOD detection, playback, UI)
   popup.html / .js     Extension popup — toggle switch
-  styles.css           All custom styles for the overlay and controls
+  styles.css           Styles for injected controls (seekbar, buttons, LIVE)
 lib/
   hls.min.js           HLS.js library for adaptive HLS playback
 icons/
@@ -95,21 +95,23 @@ icons/
 
 ### Flow
 
-1. **VOD unlock** — At `document_start`, `vod-unlock.js` runs in the MAIN world (before Twitch's own scripts). It patches `window.fetch` and the `Worker` constructor so that any Usher VOD request returning 403 (subscriber-only) is transparently replaced with a synthetic m3u8 playlist built from direct CDN URLs. This makes sub-only VODs play natively in Twitch's player.
+1. **VOD unlock** — At `document_start`, `vod-unlock.js` is injected into the page. It patches the `Worker` constructor to intercept `self.fetch` inside Twitch's Amazon IVS worker. When a Usher VOD request returns 403 (subscriber-only), it constructs a synthetic m3u8 playlist from direct CDN URLs, making sub-only VODs play natively.
 
-2. **Channel detection** — The content script injects `inject.js` into the Twitch page. The script detects which channel you're watching by parsing the URL, and hooks into `history.pushState`/`replaceState` to track SPA navigation.
+2. **Channel detection** — `inject.js` detects which channel you're watching by parsing the URL, and hooks into `history.pushState`/`replaceState` to track SPA navigation.
 
-3. **VOD lookup** — When a channel is detected, the script queries Twitch's GQL API for the most recent archive VOD (within the last 48 hours). If found, the rewind button is added to the native player controls.
+3. **Subscription check** — When a live channel is detected, the extension checks if you're subscribed via Twitch's GQL API. If subscribed, it skips entirely (you already have native VOD access).
 
-4. **Rewind activation** — Clicking the rewind button:
-   - Fetches a VOD playback token via Twitch's `PlaybackAccessToken_Template` GQL query
-   - Constructs an HLS playlist URL through Twitch's Usher service
-   - If the token is rejected (subscriber-only), falls back to **direct CDN access** by extracting the internal VOD path from the `seekPreviewsURL` metadata field
-   - Creates a video overlay on top of the native player
-   - Loads the VOD into hls.js and seeks to the appropriate position
-   - Mutes the native live player underneath
+4. **VOD pre-loading** — If not subscribed, the extension finds the currently recording VOD, fetches a playback token, and pre-loads the HLS manifest in the background. This makes the first rewind nearly instant.
 
-5. **Return to live** — Clicking LIVE (or pressing Escape) destroys the HLS instance, hides the overlay, and restores the native player's volume.
+5. **Controls injection** — A seekbar, skip buttons, time display, behind indicator, and LIVE button are injected directly into Twitch's native player controls. A MutationObserver re-injects them if React re-renders the controls.
+
+6. **Rewind activation** — Dragging the seekbar backward:
+   - Shows the pre-loaded VOD video on top of the native video (inside the same `video-ref` container, below the controls overlay)
+   - Seeks to the selected position and starts playback
+   - Mutes the native player (event-driven — a `volumechange` listener enforces muting, and a MutationObserver catches video element replacements)
+   - Syncs volume level from the native player to the VOD video
+
+7. **Return to live** — Clicking LIVE pauses and hides the VOD video (keeping HLS alive for instant re-rewind), unmutes the native player, and resumes live playback.
 
 ### Sub-only VOD bypass
 
@@ -118,14 +120,14 @@ When a streamer has subscriber-only VODs, the standard token request fails. The 
 1. Queries Twitch GQL for the VOD's `seekPreviewsURL` (a storyboard thumbnail URL that's always public)
 2. Extracts the internal VOD path identifier from that URL
 3. Constructs direct CDN URLs for each quality level (`chunked`, `1080p60`, `720p60`, etc.)
-4. Probes each URL and uses the first one that responds successfully
-5. Feeds the direct m3u8 URL to hls.js — no token needed
+4. Probes each URL to find available qualities and detect codec (H.264/H.265)
+5. Builds a synthetic HLS master playlist and returns it as a 200 response
 
 ### Limitations
 
-- **VODs must exist** — The streamer must have VOD saving enabled (either "Store past broadcasts" or automatic archiving). If no recent VOD is found, the rewind button won't appear.
+- **VODs must exist** — The streamer must have VOD saving enabled. If no active recording is found, the seekbar won't appear.
 - **~15 second buffer** — There is a minimum gap of ~15 seconds between the live edge and the furthest point you can seek to, since VOD segments take time to become available.
-- **Browser only** — This is a Chrome/Chromium extension. Firefox support is not currently implemented (Manifest V3 differences).
+- **Browser only** — This is a Chrome/Chromium extension. Firefox support is not currently implemented.
 
 ## Contributing
 
@@ -140,10 +142,10 @@ Contributions are welcome! Here's how to get started:
 
 ### Project structure
 
-- **`src/vod-unlock.js`** — Runs at `document_start` in the MAIN world. Patches `fetch` and `Worker` to intercept and bypass sub-only VOD restrictions before Twitch's player loads.
-- **`src/inject.js`** — Core rewind logic. Runs in the page context (not the extension context) so it can access Twitch's cookies and DOM directly.
-- **`src/content.js`** — Thin bridge that injects scripts and relays messages between the extension and the page.
-- **`src/styles.css`** — All styling for the rewind button, overlay, controls, and notifications.
+- **`src/vod-unlock.js`** — Injected at `document_start`. Patches the Worker constructor to intercept fetch inside Twitch's IVS worker for sub-only VOD bypass.
+- **`src/inject.js`** — Core rewind logic. Injects controls into Twitch's native player, manages HLS playback, handles volume sync, quality switching, and subscription detection.
+- **`src/content.js`** — Content script that injects `vod-unlock.js` immediately and `hls.js` + `inject.js` after DOM ready.
+- **`src/styles.css`** — Styles for the injected seekbar, buttons, time display, and LIVE button.
 - **`src/background.js`** — Minimal service worker for persisting the enable/disable toggle.
 
 ### Guidelines
