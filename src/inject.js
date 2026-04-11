@@ -621,20 +621,59 @@
     }
   }
 
+  // ─── Native audio mute (event-driven) ──────────────────────────────────────
+
+  let mutedVideoRef = null;
+  let videoObserver = null;
+
+  function onNativeVolumeChange() {
+    if (state.isRewinding && this.volume > 0) {
+      this._trSavedVolume = this._trSavedVolume || this.volume;
+      this.volume = 0;
+    }
+  }
+
+  function attachMuteListener(vid) {
+    if (mutedVideoRef === vid) return;
+    detachMuteListener();
+    vid._trSavedVolume = vid.volume;
+    vid.volume = 0;
+    vid.addEventListener('volumechange', onNativeVolumeChange);
+    mutedVideoRef = vid;
+  }
+
+  function detachMuteListener() {
+    if (mutedVideoRef) {
+      mutedVideoRef.removeEventListener('volumechange', onNativeVolumeChange);
+      if (mutedVideoRef._trSavedVolume !== undefined) {
+        mutedVideoRef.volume = mutedVideoRef._trSavedVolume;
+        delete mutedVideoRef._trSavedVolume;
+      }
+      mutedVideoRef = null;
+    }
+  }
+
   function muteNative() {
-    const orig = twitchVideo();
-    if (orig && orig._trSavedVolume === undefined) {
-      orig._trSavedVolume = orig.volume;
-      orig.volume = 0;
+    const vid = twitchVideo();
+    if (vid) attachMuteListener(vid);
+
+    // Watch for Twitch replacing the <video> element
+    if (!videoObserver) {
+      const container = playerContainer();
+      if (container) {
+        videoObserver = new MutationObserver(() => {
+          if (!state.isRewinding) return;
+          const vid = twitchVideo();
+          if (vid && vid !== mutedVideoRef) attachMuteListener(vid);
+        });
+        videoObserver.observe(container, { childList: true, subtree: true });
+      }
     }
   }
 
   function unmuteNative() {
-    const orig = twitchVideo();
-    if (orig && orig._trSavedVolume !== undefined) {
-      orig.volume = orig._trSavedVolume;
-      delete orig._trSavedVolume;
-    }
+    detachMuteListener();
+    if (videoObserver) { videoObserver.disconnect(); videoObserver = null; }
   }
 
   function goLive() {
