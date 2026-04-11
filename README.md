@@ -157,6 +157,10 @@ Contributions are welcome! Here's how to get started:
 
 If you find a bug or have a feature request, please [open an issue](https://github.com/Alban1911/TwitchRewind/issues).
 
+## Credits
+
+The sub-only VOD unlock feature is inspired by [TwitchNoSub](https://github.com/besuper/TwitchNoSub) by [@besuper](https://github.com/besuper). The Worker fetch interception approach and direct CDN URL construction technique are based on their work.
+
 ## License
 
 MIT
