@@ -549,9 +549,12 @@
     // Already rewinding — just seek
     if (state.isRewinding && state.vodVideo && state.hlsReady) {
       state.vodVideo.currentTime = seekTo;
-      state.vodVideo.play().catch(() => {});
       return;
     }
+
+    // Capture current play/pause state before switching
+    const nativeVid = twitchVideo();
+    const wasPaused = nativeVid ? nativeVid.paused : false;
 
     log('Rewind → seek to', formatTime(seekTo));
 
@@ -559,11 +562,16 @@
     if (state.hlsReady && state.hlsInstance && state.vodVideo) {
       state.vodVideo.currentTime = seekTo;
       showVodVideo();
-      state.vodVideo.play().catch(() => {});
+      if (wasPaused) {
+        state.vodVideo.pause();
+      } else {
+        state.vodVideo.play().catch(() => {});
+      }
       state.isRewinding = true;
       muteNative();
       const lb = document.getElementById('tr-live-btn');
       if (lb) lb.classList.remove('tr-live-btn--active');
+      updatePlayPauseIcon();
       return;
     }
 
@@ -596,7 +604,12 @@
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         state.hlsReady = true;
         log('VOD manifest loaded');
-        video.play().catch(() => {});
+        if (wasPaused) {
+          video.pause();
+        } else {
+          video.play().catch(() => {});
+        }
+        updatePlayPauseIcon();
       });
 
       hls.on(Hls.Events.ERROR, (_e, data) => {
@@ -678,6 +691,7 @@
 
   function goLive() {
     log('Back to live');
+    const wasPaused = state.vodVideo ? state.vodVideo.paused : false;
     state.isRewinding = false;
 
     // Pause and hide VOD video (keep HLS alive for instant re-rewind)
@@ -685,6 +699,18 @@
     hideVodVideo();
 
     unmuteNative();
+
+    // Preserve pause state on native player
+    if (wasPaused) {
+      // Small delay to let unmute settle before pausing
+      requestAnimationFrame(() => {
+        const nv = twitchVideo();
+        if (nv) nv.pause();
+        updatePlayPauseIcon();
+      });
+    } else {
+      updatePlayPauseIcon();
+    }
 
     // Reset seekbar to live edge
     if (state.ui.seekbar) {
