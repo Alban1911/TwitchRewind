@@ -54,6 +54,19 @@
   background: rgba(255, 255, 255, 0.25);
 }
 
+.tr-live-label--at-live {
+  background: #eb0400;
+  gap: 0;
+}
+
+.tr-live-label--at-live:hover {
+  background: #c50300;
+}
+
+.tr-live-label--at-live svg {
+  display: none;
+}
+
 .tr-live-text {
   font-family: Inter, 'Noto Sans Arabic', Roobert, 'Helvetica Neue', Helvetica, Arial, sans-serif;
   font-size: 13px;

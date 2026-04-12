@@ -350,7 +350,7 @@
 
     const liveLabel = document.createElement('div');
     liveLabel.id = 'tr-live-label';
-    liveLabel.className = 'tr-live-label';
+    liveLabel.className = 'tr-live-label tr-live-label--at-live';
     liveLabel.tabIndex = 0;
     liveLabel.setAttribute('role', 'button');
     liveLabel.setAttribute('aria-label', 'Skip to Live');
@@ -689,7 +689,7 @@
       state.vodVideo.play().catch(() => {});
       state.isRewinding = true;
       muteNative();
-      // LIVE label is in seekbar area, no toggle needed
+      document.getElementById('tr-live-label')?.classList.remove('tr-live-label--at-live');
       updatePlayPauseIcon();
       return;
     }
@@ -742,7 +742,7 @@
       showVodVideo();
       state.isRewinding = true;
       muteNative();
-      // LIVE label is in seekbar area, no toggle needed
+      document.getElementById('tr-live-label')?.classList.remove('tr-live-label--at-live');
     } catch (err) {
       log('Rewind failed:', err);
       goLive();
@@ -862,6 +862,8 @@
     }
     const behindEl = document.getElementById('tr-behind');
     if (behindEl) behindEl.textContent = '';
+
+    document.getElementById('tr-live-label')?.classList.add('tr-live-label--at-live');
   }
 
   // ─── Seek updates ──────────────────────────────────────────────────────────
