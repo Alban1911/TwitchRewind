@@ -238,36 +238,6 @@
   fill: currentColor;
 }
 
-/* --- Time display (right control group) --- */
-.tr-time-display {
-  color: #efeff1;
-  font-size: 13px;
-  font-family: Inter, 'Noto Sans Arabic', Roobert, 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  font-weight: 700;
-  white-space: nowrap;
-  user-select: none;
-  padding: 0 5px;
-  line-height: 32px;
-  display: flex;
-  align-items: center;
-  height: 32px;
-}
-
-/* --- Behind indicator --- */
-.tr-behind {
-  color: #f85149;
-  font-size: 13px;
-  font-family: Inter, 'Noto Sans Arabic', Roobert, 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  font-weight: 700;
-  white-space: nowrap;
-  user-select: none;
-  padding: 0 4px;
-  line-height: 32px;
-  display: flex;
-  align-items: center;
-  height: 32px;
-}
-
 /* --- Notification toast --- */
 .tr-notif {
   position: absolute;

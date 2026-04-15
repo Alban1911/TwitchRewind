@@ -153,6 +153,14 @@
     );
   }
 
+  function isAdPlaying() {
+    return !!(
+      document.querySelector('[data-a-target="video-ad-label"]') ||
+      document.querySelector('[data-test-selector="ad-overlay-component"]') ||
+      document.querySelector('.ad-banner-default-container')
+    );
+  }
+
   function twitchVideo() {
     const c = playerContainer();
     if (!c) return null;
@@ -305,8 +313,7 @@
 
   function injectControls() {
     document.getElementById('tr-seekbar-area')?.remove();
-    document.getElementById('tr-time')?.remove();
-    document.getElementById('tr-behind')?.remove();
+
 
     const controls = nativeControls();
     if (!controls) return;
@@ -455,20 +462,6 @@
       }, true);
     }
 
-    // ── Time + behind (right control group) ──────────────────────────────
-    const rightGroup = nativeRightGroup();
-    if (rightGroup) {
-      const timeEl = document.createElement('span');
-      timeEl.id = 'tr-time';
-      timeEl.className = 'tr-time-display';
-
-      const behindEl = document.createElement('span');
-      behindEl.id = 'tr-behind';
-      behindEl.className = 'tr-behind';
-
-      rightGroup.prepend(behindEl, timeEl);
-    }
-
     state.ui.seekArea = seekArea;
     state.ui.seekbar = { played: seekPlayed, thumb: seekThumb };
     state.ui.curLabel = curLabel;
@@ -480,8 +473,7 @@
   function removeControls() {
     stopSeekUpdates();
     document.getElementById('tr-seekbar-area')?.remove();
-    document.getElementById('tr-time')?.remove();
-    document.getElementById('tr-behind')?.remove();
+
     state.ui = {};
   }
 
@@ -603,7 +595,7 @@
   // ─── Rewind (VOD playback) ─────────────────────────────────────────────────
 
   async function startRewind(seekTo) {
-    if (!state.vodId) return;
+    if (!state.vodId || isAdPlaying()) return;
 
     const maxSeek = Math.max(0, elapsed() - MIN_REWIND_SEC);
     seekTo = Math.max(0, Math.min(seekTo, maxSeek));
@@ -795,9 +787,6 @@
       state.ui.seekbar.played.style.width = '100%';
       state.ui.seekbar.thumb.style.left = '100%';
     }
-    const behindEl = document.getElementById('tr-behind');
-    if (behindEl) behindEl.textContent = '';
-
     document.getElementById('tr-live-label')?.classList.add('tr-live-label--at-live');
   }
 
@@ -814,38 +803,32 @@
   }
 
   function updateSeek() {
+    const seekArea = document.getElementById('tr-seekbar-area');
+    if (seekArea) seekArea.style.display = isAdPlaying() ? 'none' : '';
+
     const total = elapsed();
     if (total <= 0) return;
 
     // Use getElementById for elements injected into Twitch's control groups
     // (React can re-render and replace them, making cached refs stale)
-    const timeEl = document.getElementById('tr-time');
-    const behindEl = document.getElementById('tr-behind');
     const seekbar = state.ui.seekbar;
     const curLabel = state.ui.curLabel;
 
     if (state.isRewinding && state.vodVideo) {
       const cur = state.vodVideo.currentTime;
       const pct = (cur / total) * 100;
-      const behind = Math.max(0, total - cur);
 
       if (seekbar) {
         seekbar.played.style.width = pct + '%';
         seekbar.thumb.style.left = pct + '%';
       }
       if (curLabel) curLabel.textContent = formatTime(cur);
-      if (timeEl) timeEl.textContent = `${formatTime(cur)} / ${formatTime(total)}`;
-      if (behindEl) {
-        behindEl.textContent = behind > MIN_REWIND_SEC + 5 ? `-${formatTime(behind)}` : '';
-      }
     } else {
       if (seekbar) {
         seekbar.played.style.width = '100%';
         seekbar.thumb.style.left = '100%';
       }
       if (curLabel) curLabel.textContent = formatTime(total);
-      if (timeEl) timeEl.textContent = formatTime(total);
-      if (behindEl) behindEl.textContent = '';
     }
   }
 
