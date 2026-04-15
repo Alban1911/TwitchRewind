@@ -176,8 +176,6 @@
   const ICONS = {
     play: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2.969V21.03a.5.5 0 0 0 .765.424L20.18 12.424a.5.5 0 0 0 0-.849L5.765 2.546A.5.5 0 0 0 5 2.97Z"/></svg>',
     pause: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H5v16h5V4Zm9 0h-5v16h5V4Z"/></svg>',
-    skipBack: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3.5V1L8 5l4 4V6.5a5.5 5.5 0 1 1-5.5 5.5H5a7 7 0 1 0 7-7z"/></svg>',
-    skipFwd: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor" style="transform:scaleX(-1)"><path d="M12 3.5V1L8 5l4 4V6.5a5.5 5.5 0 1 1-5.5 5.5H5a7 7 0 1 0 7-7z"/></svg>',
     skipToEnd: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5.794 4.578 16 12 5.794 19.422A.5.5 0 0 1 5 19.018V4.982a.5.5 0 0 1 .794-.404ZM17 4h2v16h-2V4Z"/></svg>',
   };
 
@@ -192,26 +190,6 @@
     b.setAttribute('aria-label', title || '');
     b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
 
-    wrap.appendChild(b);
-    return wrap;
-  }
-
-  function mkSkipBtn(direction, onClick, title) {
-    const wrap = document.createElement('div');
-    wrap.className = 'tr-btn-wrap';
-
-    const b = document.createElement('button');
-    b.className = 'tr-native-btn';
-    b.innerHTML = direction === 'back' ? ICONS.skipBack : ICONS.skipFwd;
-    if (title) b.title = title;
-    b.setAttribute('aria-label', title || '');
-
-    const textOverlay = document.createElement('span');
-    textOverlay.className = 'tr-skip-text';
-    textOverlay.textContent = '10';
-    b.appendChild(textOverlay);
-
-    b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
     wrap.appendChild(b);
     return wrap;
   }
@@ -327,8 +305,6 @@
 
   function injectControls() {
     document.getElementById('tr-seekbar-area')?.remove();
-    document.getElementById('tr-skip-back')?.remove();
-    document.getElementById('tr-skip-fwd')?.remove();
     document.getElementById('tr-time')?.remove();
     document.getElementById('tr-behind')?.remove();
 
@@ -479,46 +455,8 @@
       }, true);
     }
 
-    // ── Skip buttons (left control group) ────────────────────────────────
-    const leftGroup = nativeLeftGroup();
-    const rightGroup = nativeRightGroup();
-
-    if (leftGroup) {
-      const backWrap = mkSkipBtn('back', () => {
-        if (state.isRewinding && state.vodVideo) {
-          state.vodVideo.currentTime = Math.max(0, state.vodVideo.currentTime - SEEK_STEP);
-        } else {
-          startRewind(Math.max(0, elapsed() - MIN_REWIND_SEC - SEEK_STEP));
-        }
-      }, 'Back 10s');
-      backWrap.id = 'tr-skip-back';
-
-      const fwdWrap = mkSkipBtn('forward', () => {
-        if (state.isRewinding && state.vodVideo) {
-          const max = elapsed() - MIN_REWIND_SEC;
-          state.vodVideo.currentTime = Math.min(max, state.vodVideo.currentTime + SEEK_STEP);
-        }
-      }, 'Forward 10s');
-      fwdWrap.id = 'tr-skip-fwd';
-
-      // Insert after the play/pause wrapper
-      const playPauseWrap = leftGroup.querySelector('[data-a-target="player-play-pause-button"]')?.closest('.InjectLayout-sc-1i43xsx-0');
-      if (playPauseWrap) {
-        playPauseWrap.after(backWrap, fwdWrap);
-      } else {
-        const firstChild = leftGroup.children[0];
-        if (firstChild) {
-          firstChild.after(backWrap, fwdWrap);
-        } else {
-          leftGroup.append(backWrap, fwdWrap);
-        }
-      }
-
-      state.ui.backBtn = backWrap;
-      state.ui.fwdBtn = fwdWrap;
-    }
-
     // ── Time + behind (right control group) ──────────────────────────────
+    const rightGroup = nativeRightGroup();
     if (rightGroup) {
       const timeEl = document.createElement('span');
       timeEl.id = 'tr-time';
@@ -542,8 +480,6 @@
   function removeControls() {
     stopSeekUpdates();
     document.getElementById('tr-seekbar-area')?.remove();
-    document.getElementById('tr-skip-back')?.remove();
-    document.getElementById('tr-skip-fwd')?.remove();
     document.getElementById('tr-time')?.remove();
     document.getElementById('tr-behind')?.remove();
     state.ui = {};
@@ -560,8 +496,7 @@
     if (!container) return;
     reinjectObserver = new MutationObserver(() => {
       if (!state.vodId || reinjectPending) return;
-      if (!document.getElementById('tr-seekbar-area') ||
-          !document.getElementById('tr-skip-back')) {
+      if (!document.getElementById('tr-seekbar-area')) {
         reinjectPending = true;
         requestAnimationFrame(() => {
           injectControls();

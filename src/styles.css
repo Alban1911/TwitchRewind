@@ -110,13 +110,6 @@
   background: rgba(255, 255, 255, 0.35);
   display: flex;
   align-items: center;
-  transition: height 0.15s ease;
-}
-
-/* Track grows on hover */
-.tr-seekbar:hover .tr-seekbar-track,
-.tr-seekbar--active .tr-seekbar-track {
-  height: 7px;
 }
 
 /* Played/filled portion (Twitch purple) */
@@ -128,7 +121,6 @@
   border-radius: 4px;
   background: #9147ff;
   pointer-events: none;
-  transition: height 0.15s ease;
 }
 
 /* Scrubber thumb */
@@ -244,22 +236,6 @@
   width: 24px;
   height: 24px;
   fill: currentColor;
-}
-
-/* "10" text overlay for skip buttons */
-.tr-native-btn .tr-skip-text {
-  position: absolute;
-  font-family: Inter, 'Noto Sans Arabic', Roobert, 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  font-size: 7px;
-  font-weight: 700;
-  line-height: 1;
-  color: currentColor;
-  pointer-events: none;
-  /* Center the "10" visually in the circular arrow area */
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  margin-top: 1px;
 }
 
 /* --- Time display (right control group) --- */
