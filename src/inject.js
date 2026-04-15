@@ -463,7 +463,7 @@
     }
 
     state.ui.seekArea = seekArea;
-    state.ui.seekbar = { played: seekPlayed, thumb: seekThumb };
+    state.ui.seekbar = { el: seekbar, played: seekPlayed, thumb: seekThumb };
     state.ui.curLabel = curLabel;
 
     startSeekUpdates();
@@ -819,12 +819,14 @@
       const pct = (cur / total) * 100;
 
       if (seekbar) {
+        seekbar.el?.classList.remove('tr-seekbar--live');
         seekbar.played.style.width = pct + '%';
         seekbar.thumb.style.left = pct + '%';
       }
       if (curLabel) curLabel.textContent = formatTime(cur);
     } else {
       if (seekbar) {
+        seekbar.el?.classList.add('tr-seekbar--live');
         seekbar.played.style.width = '100%';
         seekbar.thumb.style.left = '100%';
       }
