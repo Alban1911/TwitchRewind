@@ -515,8 +515,28 @@
 
   // ─── VOD video element (sits above native video, below controls) ────────
 
+  function reattachVodVideo() {
+    const v = state.vodVideo;
+    if (!v) return false;
+    if (v.isConnected) return true;
+    const container = playerContainer();
+    if (!container) return false;
+    const nv = twitchVideo();
+    const videoRef = container.querySelector('.video-ref, [data-a-target="video-ref"]');
+    if (nv && videoRef && videoRef.contains(nv)) nv.after(v);
+    else if (videoRef) videoRef.prepend(v);
+    else container.appendChild(v);
+    log('Re-attached VOD video');
+    return true;
+  }
+
   function ensureVodVideo() {
-    if (state.vodVideo) return state.vodVideo;
+    if (state.vodVideo) {
+      // React can wipe the player subtree and leave our video detached —
+      // a detached video plays audio with no picture, so reattach it
+      if (state.vodVideo.isConnected || reattachVodVideo()) return state.vodVideo;
+      return null;
+    }
     const container = playerContainer();
     if (!container) return null;
 
@@ -639,6 +659,7 @@
 
     // If pre-loaded, instant rewind
     if (state.hlsReady && state.hlsInstance && state.vodVideo) {
+      if (!state.vodVideo.isConnected && !reattachVodVideo()) return;
       syncVodVolume();
       state.vodVideo.currentTime = seekTo;
       showVodVideo();
@@ -796,6 +817,8 @@
           if (!state.isRewinding) return;
           const vid = twitchVideo();
           if (vid && vid !== mutedVideoRef) attachMuteListener(vid);
+          // Reattach our video if React wiped the player subtree mid-rewind
+          if (state.vodVideo && !state.vodVideo.isConnected) reattachVodVideo();
         });
         videoObserver.observe(container, { childList: true, subtree: true });
       }
@@ -810,6 +833,7 @@
   function goLive() {
     log('Back to live');
     state.isRewinding = false;
+    state.pendingSeek = null;
 
     // Pause and hide VOD video (keep HLS alive for instant re-rewind)
     if (state.vodVideo) {
@@ -822,6 +846,7 @@
 
     // Always resume native playback
     requestAnimationFrame(() => {
+      if (state.isRewinding) return; // user started rewinding again already
       const nv = twitchVideo();
       if (nv && nv.paused) nv.play().catch(() => {});
     });
@@ -978,7 +1003,8 @@
     state.subscribed = null;
     if (state.hlsInstance) { state.hlsInstance.destroy(); state.hlsInstance = null; }
     state.hlsReady = false;
-    if (state.vodVideo) { state.vodVideo.remove(); state.vodVideo = null; }
+    // Pause BEFORE removing — a detached <video> keeps playing audio
+    if (state.vodVideo) { state.vodVideo.pause(); state.vodVideo.remove(); state.vodVideo = null; }
     unmuteNative();
     clearInterval(state.vodCheckInterval);
     state.vodCheckInterval = null;
