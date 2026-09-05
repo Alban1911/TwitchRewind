@@ -24,6 +24,9 @@
     ui: {},
     seekInterval: null,
     vodCheckInterval: null,
+    preloading: false,     // preload (URL fetch + HLS setup) in flight
+    loadingRewind: false,  // rewind HLS setup in flight
+    pendingSeek: null,     // seek requested while a load is in flight
     subscribed: null,      // cached subscription check for the current channel
     vodMisses: 0,          // consecutive VOD checks that found no recording
   };
@@ -551,20 +554,24 @@
   // ─── Pre-load VOD (fetch URL + HLS manifest in background) ────────────────
 
   async function preloadVod() {
-    if (!state.vodId || state.hlsReady) return;
+    if (!state.vodId || state.hlsReady || state.preloading) return;
+    const vodId = state.vodId;
+    state.preloading = true;
     log('Pre-loading VOD URL...');
 
     try {
       let url;
-      const tok = await fetchVodToken(state.vodId);
+      const tok = await fetchVodToken(vodId);
+      if (state.vodId !== vodId || state.loadingRewind) return; // channel changed or rewind took over
       if (tok) {
-        url = vodPlaylistUrl(state.vodId, tok.value, tok.signature);
+        url = vodPlaylistUrl(vodId, tok.value, tok.signature);
         try {
           const check = await fetch(url);
           if (!check.ok) url = null;
         } catch (_) { url = null; }
       }
-      if (!url) url = await findDirectVodUrl(state.vodId);
+      if (!url) url = await findDirectVodUrl(vodId);
+      if (state.vodId !== vodId || state.loadingRewind) return;
       if (!url) { log('VOD URL not available'); return; }
 
       state.vodUrl = url;
@@ -597,9 +604,13 @@
       hls.attachMedia(video);
 
       // Pause immediately — we just want the manifest, not buffering
-      video.addEventListener('loadedmetadata', () => { video.pause(); }, { once: true });
+      video.addEventListener('loadedmetadata', () => {
+        if (!state.isRewinding) video.pause();
+      }, { once: true });
     } catch (e) {
       log('Pre-load failed:', e);
+    } finally {
+      state.preloading = false;
     }
   }
 
@@ -614,6 +625,13 @@
     // Already rewinding — just seek
     if (state.isRewinding && state.vodVideo && state.hlsReady) {
       state.vodVideo.currentTime = seekTo;
+      return;
+    }
+
+    // A load is already in flight — remember the target and apply it on ready
+    // instead of tearing down and restarting the load
+    if (state.loadingRewind) {
+      state.pendingSeek = seekTo;
       return;
     }
 
@@ -633,10 +651,12 @@
     }
 
     // Not pre-loaded — load now
+    state.loadingRewind = true;
     try {
       let url = state.vodUrl;
       if (!url) {
         const tok = await fetchVodToken(state.vodId);
+        if (!state.vodId) return; // channel changed while fetching
         if (tok) {
           url = vodPlaylistUrl(state.vodId, tok.value, tok.signature);
           try {
@@ -645,6 +665,7 @@
           } catch (_) { url = null; }
         }
         if (!url) url = await findDirectVodUrl(state.vodId);
+        if (!state.vodId) return;
         if (!url) { log('Cannot access VOD'); return; }
         state.vodUrl = url;
       }
@@ -657,11 +678,20 @@
 
       const hls = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 120, startPosition: seekTo });
       state.hlsInstance = hls;
+      state.pendingSeek = null;
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         state.hlsReady = true;
         log('VOD manifest loaded');
+        if (!state.isRewinding) {
+          // User returned to live while the load was in flight —
+          // don't start hidden VOD playback on top of the live stream
+          video.pause();
+          return;
+        }
         syncVodVolume();
+        if (state.pendingSeek != null) video.currentTime = state.pendingSeek;
+        state.pendingSeek = null;
         video.play().catch(() => {});
         updatePlayPauseIcon();
       });
@@ -669,6 +699,7 @@
       hls.on(Hls.Events.ERROR, (_e, data) => {
         if (data.fatal) {
           log('Fatal HLS error:', data.details);
+          state.vodUrl = null; // URL/token may have expired — refetch on next attempt
           if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
           else goLive();
         }
@@ -684,6 +715,8 @@
     } catch (err) {
       log('Rewind failed:', err);
       goLive();
+    } finally {
+      state.loadingRewind = false;
     }
   }
 
@@ -940,6 +973,7 @@
 
   function cleanup() {
     state.isRewinding = false;
+    state.pendingSeek = null;
     state.vodMisses = 0;
     state.subscribed = null;
     if (state.hlsInstance) { state.hlsInstance.destroy(); state.hlsInstance = null; }
