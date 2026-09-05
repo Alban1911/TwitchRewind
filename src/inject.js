@@ -311,6 +311,42 @@
     btn.setAttribute('aria-label', paused ? 'Play' : 'Pause');
   }
 
+  // ─── Seekbar drag (document-level so re-injection never leaks listeners) ───
+
+  let seekDragging = false;
+
+  function seekPctFromEvent(el, e) {
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0
+      ? Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+      : 0;
+  }
+
+  function clampSeekSeconds(pct) {
+    const total = elapsed();
+    return Math.min(pct * total, Math.max(0, total - MIN_REWIND_SEC));
+  }
+
+  function onDocMouseMove(e) {
+    const sb = state.ui.seekbar;
+    if (!sb) return;
+    if (seekDragging && state.vodVideo) {
+      state.vodVideo.currentTime = clampSeekSeconds(seekPctFromEvent(sb.el, e));
+    }
+    if (seekDragging || sb.el.matches(':hover')) {
+      const pct = seekPctFromEvent(sb.el, e);
+      sb.tooltip.textContent = formatTime(pct * elapsed());
+      sb.tooltip.style.left = (pct * 100) + '%';
+    }
+  }
+
+  function onDocMouseUp() {
+    if (seekDragging) {
+      seekDragging = false;
+      state.ui.seekbar?.el.classList.remove('tr-seekbar--active');
+    }
+  }
+
   // ─── Inject controls into native Twitch UI ─────────────────────────────────
 
   function injectControls() {
@@ -411,40 +447,13 @@
       }
     }
 
-    // ── Seekbar interaction (drag/hover) ─────────────────────────────────
-    let seeking = false;
-
-    function seekPctFromEvent(e) {
-      const rect = seekbar.getBoundingClientRect();
-      return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    }
-
+    // ── Seekbar interaction (drag starts here; move/up are document-level) ──
     seekbar.addEventListener('mousedown', (e) => {
-      seeking = true;
+      if (e.button !== 0 || !state.vodId) return;
+      e.preventDefault(); // avoid text selection while dragging
+      seekDragging = true;
       seekbar.classList.add('tr-seekbar--active');
-      const pct = seekPctFromEvent(e);
-      const total = elapsed();
-      const maxSec = Math.max(0, total - MIN_REWIND_SEC);
-      const seekTo = Math.min(pct * total, maxSec);
-      startRewind(seekTo);
-    });
-
-    document.addEventListener('mousemove', (e) => {
-      if (seeking && state.vodVideo) {
-        const pct = seekPctFromEvent(e);
-        const total = elapsed();
-        const maxSec = Math.max(0, total - MIN_REWIND_SEC);
-        state.vodVideo.currentTime = Math.min(pct * total, maxSec);
-      }
-      if (seekbar.matches(':hover') || seeking) {
-        const pct = seekPctFromEvent(e);
-        seekTooltip.textContent = formatTime(pct * elapsed());
-        seekTooltip.style.left = (pct * 100) + '%';
-      }
-    });
-
-    document.addEventListener('mouseup', () => {
-      if (seeking) { seeking = false; seekbar.classList.remove('tr-seekbar--active'); }
+      startRewind(clampSeekSeconds(seekPctFromEvent(seekbar, e)));
     });
 
     // ── Intercept native play/pause when rewinding ───────────────────────
@@ -465,7 +474,7 @@
     }
 
     state.ui.seekArea = seekArea;
-    state.ui.seekbar = { el: seekbar, played: seekPlayed, thumb: seekThumb };
+    state.ui.seekbar = { el: seekbar, played: seekPlayed, thumb: seekThumb, tooltip: seekTooltip };
     state.ui.curLabel = curLabel;
 
     startSeekUpdates();
@@ -1013,6 +1022,8 @@
     hookVolumeSlider();
     hookSpeedMenu();
     hookCopyUrl();
+    document.addEventListener('mousemove', onDocMouseMove);
+    document.addEventListener('mouseup', onDocMouseUp);
     const ch = channelFromUrl();
     if (ch) onChannelChange(ch);
   }
