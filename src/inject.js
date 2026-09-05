@@ -885,7 +885,7 @@
 
     if (state.isRewinding && state.vodVideo) {
       const cur = state.vodVideo.currentTime;
-      const pct = (cur / total) * 100;
+      const pct = Math.min(100, (cur / total) * 100);
 
       if (seekbar) {
         seekbar.el?.classList.remove('tr-seekbar--live');
