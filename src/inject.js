@@ -24,6 +24,8 @@
     ui: {},
     seekInterval: null,
     vodCheckInterval: null,
+    subscribed: null,      // cached subscription check for the current channel
+    vodMisses: 0,          // consecutive VOD checks that found no recording
   };
 
   // ─── Utilities ──────────────────────────────────────────────────────────────
@@ -850,39 +852,68 @@
     return KNOWN_ROUTES.has(parts[0].toLowerCase()) ? null : parts[0];
   }
 
+  // Navigation epoch: increments on every channel change so stale async
+  // continuations (waitForPlayer, GQL calls) can detect they've been superseded
+  let navEpoch = 0;
+
   async function onChannelChange(ch) {
+    const epoch = ++navEpoch;
     cleanup();
     if (!ch) return;
     state.channel = ch;
+    state.subscribed = null;
     log('Channel:', ch);
     await waitForPlayer();
+    if (epoch !== navEpoch) return;
     await checkVod();
+    if (epoch !== navEpoch) return;
+    clearInterval(state.vodCheckInterval);
     state.vodCheckInterval = setInterval(checkVod, VOD_CHECK_INTERVAL);
   }
 
+  let checkInFlight = false;
+
   async function checkVod() {
-    if (!state.channel) return;
+    if (!state.channel || checkInFlight) return;
+    checkInFlight = true;
     try {
       // Skip if user is subscribed — they have native VOD access
-      if (await isSubscribed(state.channel)) {
-        log('Subscribed to channel, skipping rewind');
-        return;
-      }
+      if (state.subscribed === null) state.subscribed = await isSubscribed(state.channel);
+      if (state.subscribed) return;
 
       const vod = await fetchCurrentVod(state.channel);
       if (vod) {
+        const isNew = state.vodId !== vod.id;
         state.vodId = vod.id;
         state.vodCreatedAt = vod.createdAt;
-        log('VOD found:', vod.id);
-        injectControls();
-        watchForReinject();
+        state.vodMisses = 0;
+        if (isNew) {
+          // New recording (e.g. stream restarted) — drop preloaded state for the old VOD
+          log('VOD found:', vod.id);
+          if (state.isRewinding) goLive();
+          state.vodUrl = null;
+          state.hlsReady = false;
+          if (state.hlsInstance) { state.hlsInstance.destroy(); state.hlsInstance = null; }
+        }
+        // Don't rebuild controls that are already on screen — re-injecting
+        // every 30s breaks an active drag and leaks listeners
+        if (!document.getElementById('tr-seekbar-area')) {
+          injectControls();
+          watchForReinject();
+        }
         preloadVod();
       } else {
-        state.vodId = null;
-        state.vodCreatedAt = null;
-        removeControls();
+        // Ride out transient GQL hiccups: only tear down after two
+        // consecutive misses, and never mid-rewind
+        state.vodMisses++;
+        if (state.vodMisses >= 2 && !state.isRewinding) {
+          state.vodId = null;
+          state.vodCreatedAt = null;
+          removeControls();
+        }
       }
     } catch (e) { log('VOD check error:', e); }
+    finally { checkInFlight = false; }
   }
 
   function waitForPlayer() {
@@ -900,6 +931,8 @@
 
   function cleanup() {
     state.isRewinding = false;
+    state.vodMisses = 0;
+    state.subscribed = null;
     if (state.hlsInstance) { state.hlsInstance.destroy(); state.hlsInstance = null; }
     state.hlsReady = false;
     if (state.vodVideo) { state.vodVideo.remove(); state.vodVideo = null; }
