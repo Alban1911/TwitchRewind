@@ -19,7 +19,7 @@
 
 ## Features
 
-- **Native UI integration** — A seekbar, skip buttons, time display, and LIVE button are injected directly into Twitch's native player controls. No separate overlay — it looks and feels like part of Twitch.
+- **Native UI integration** — A seekbar and LIVE button are injected directly into Twitch's native player controls. No separate overlay — it looks and feels like part of Twitch.
 - **Instant rewind** — The VOD is pre-loaded in the background so rewinding is nearly instant when you drag the seekbar backward.
 - **Sub-only VOD unlock** — Automatically unlocks subscriber-only VODs so you can watch them without subscribing. Works on both live rewind and VOD pages.
 - **Volume sync** — Volume and mute state are synced between the live stream and the rewind playback. Twitch's native volume slider and mute button control the rewind video.
@@ -46,7 +46,7 @@
 ### Rewinding a stream
 
 1. Go to any **live** Twitch channel (where you're not subscribed)
-2. A **seekbar** with time labels appears in the native player controls, along with **skip back/forward** buttons
+2. A **seekbar** and **LIVE** button appear in the native player controls
 3. **Drag the seekbar backward** to any point in the stream — the VOD loads and plays from that position
 4. Use the native Twitch controls as usual:
 
@@ -54,19 +54,20 @@
 |---|---|
 | Seekbar | Drag to any point in the stream |
 | Play / Pause | Toggle playback (native Twitch button) |
-| Skip back / forward | Jump 10 seconds (injected buttons) |
 | Volume slider | Adjusts rewind volume (native Twitch slider) |
 | Quality selector | Changes rewind video quality (native Twitch menu) |
-| LIVE | Return to the live broadcast |
+| LIVE / red dot | Return to the live broadcast |
 
 ### Keyboard shortcuts
+
+While rewinding, the shortcuts act on the rewind playback:
 
 | Key | Action |
 |---|---|
 | `Space` / `K` | Play / Pause |
-| `Left Arrow` | Seek back 10s |
-| `Right Arrow` | Seek forward 10s |
+| `←` / `→` | Seek 10s back / forward |
 | `M` | Mute / Unmute |
+| `,` / `.` | Slower / faster playback |
 
 ### Enable / Disable
 
@@ -103,7 +104,7 @@ icons/
 
 4. **VOD pre-loading** — If not subscribed, the extension finds the currently recording VOD, fetches a playback token, and pre-loads the HLS manifest in the background. This makes the first rewind nearly instant.
 
-5. **Controls injection** — A seekbar, skip buttons, time display, behind indicator, and LIVE button are injected directly into Twitch's native player controls. A MutationObserver re-injects them if React re-renders the controls.
+5. **Controls injection** — A seekbar and LIVE button are injected directly into Twitch's native player controls. A MutationObserver re-injects them if React re-renders the controls.
 
 6. **Rewind activation** — Dragging the seekbar backward:
    - Shows the pre-loaded VOD video on top of the native video (inside the same `video-ref` container, below the controls overlay)
@@ -142,11 +143,7 @@ Contributions are welcome! Here's how to get started:
 
 ### Project structure
 
-- **`src/vod-unlock.js`** — Injected at `document_start`. Patches the Worker constructor to intercept fetch inside Twitch's IVS worker for sub-only VOD bypass.
-- **`src/inject.js`** — Core rewind logic. Injects controls into Twitch's native player, manages HLS playback, handles volume sync, quality switching, and subscription detection.
-- **`src/content.js`** — Content script that injects `vod-unlock.js` immediately and `hls.js` + `inject.js` after DOM ready.
-- **`src/styles.css`** — Styles for the injected seekbar, buttons, time display, and LIVE button.
-- **`src/background.js`** — Minimal service worker for persisting the enable/disable toggle.
+See the component overview under [How It Works](#how-it-works). The file you'll touch most is **`src/inject.js`** — all rewind logic, UI injection, and player integration lives there.
 
 ### Guidelines
 
