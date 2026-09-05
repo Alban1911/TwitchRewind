@@ -132,29 +132,7 @@ When a streamer has subscriber-only VODs, the standard token request fails. The 
 
 ## Contributing
 
-Contributions are welcome! Here's how to get started:
-
-### Setting up the development environment
-
-1. Fork and clone the repository
-2. Load the extension in Chrome as described in [Installation](#installation)
-3. Make your changes — after editing, go to `chrome://extensions` and click the **reload** button on the extension card
-4. Test on a live Twitch channel
-
-### Project structure
-
-See the component overview under [How It Works](#how-it-works). The file you'll touch most is **`src/inject.js`** — all rewind logic, UI injection, and player integration lives there.
-
-### Guidelines
-
-- Keep it simple — this extension is intentionally minimal with no build step and no framework
-- Test with both regular and subscriber-only VOD channels
-- Test SPA navigation (switching channels without full page reload)
-- Make sure the native Twitch player is fully restored when exiting rewind mode
-
-### Reporting issues
-
-If you find a bug or have a feature request, please [open an issue](https://github.com/Alban1911/TwitchRewind/issues).
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) to set up your environment and the project guidelines. Bugs and feature requests go to the [issue tracker](https://github.com/Alban1911/TwitchRewind/issues).
 
 ## Credits
 
@@ -162,4 +140,4 @@ The sub-only VOD unlock feature is inspired by [TwitchNoSub](https://github.com/
 
 ## License
 
-MIT
+[MIT](LICENSE)
