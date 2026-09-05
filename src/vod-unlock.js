@@ -172,6 +172,9 @@
     xhr.open('GET', url, false);
     xhr.overrideMimeType('text/javascript');
     xhr.send();
+    if (xhr.status < 200 || xhr.status >= 300 || !xhr.responseText) {
+      throw new Error('Failed to fetch worker source (status ' + xhr.status + ')');
+    }
     return xhr.responseText;
   }
 
@@ -179,17 +182,22 @@
 
   window.Worker = class Worker extends oldWorker {
     constructor(twitchBlobUrl) {
-      var workerString = readWorkerSource(
-        ('' + twitchBlobUrl).replaceAll("'", '%27'),
-      );
-
-      var blobUrl = URL.createObjectURL(
-        new Blob([WORKER_PATCH + '\n' + workerString], {
-          type: 'application/javascript',
-        }),
-      );
-
-      super(blobUrl);
+      // If anything in the patch fails, fall back to the untouched worker —
+      // a broken patch must never take down Twitch's own player
+      var patchedUrl = null;
+      try {
+        var workerString = readWorkerSource(
+          ('' + twitchBlobUrl).replaceAll("'", '%27'),
+        );
+        patchedUrl = URL.createObjectURL(
+          new Blob([WORKER_PATCH + '\n' + workerString], {
+            type: 'application/javascript',
+          }),
+        );
+      } catch (e) {
+        log('Worker patch failed, loading unpatched worker:', e);
+      }
+      super(patchedUrl || twitchBlobUrl);
     }
   };
 
