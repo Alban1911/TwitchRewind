@@ -459,23 +459,6 @@
       startRewind(clampSeekSeconds(seekPctFromEvent(seekbar, e)));
     });
 
-    // ── Intercept native play/pause when rewinding ───────────────────────
-    const playPauseBtn = document.querySelector('[data-a-target="player-play-pause-button"]');
-    if (playPauseBtn) {
-      playPauseBtn.addEventListener('click', (e) => {
-        if (state.isRewinding && state.vodVideo) {
-          e.stopImmediatePropagation();
-          e.preventDefault();
-          if (state.vodVideo.paused) {
-            state.vodVideo.play();
-          } else {
-            state.vodVideo.pause();
-          }
-          updatePlayPauseIcon();
-        }
-      }, true);
-    }
-
     state.ui.seekArea = seekArea;
     state.ui.seekbar = { el: seekbar, played: seekPlayed, thumb: seekThumb, tooltip: seekTooltip };
     state.ui.curLabel = curLabel;
@@ -549,6 +532,9 @@
       video.paused ? video.play() : video.pause();
       updatePlayPauseIcon();
     });
+    // Keep the native play/pause icon in sync no matter what toggles the video
+    video.addEventListener('play', updatePlayPauseIcon);
+    video.addEventListener('pause', updatePlayPauseIcon);
 
     const videoRef = container.querySelector('.video-ref, [data-a-target="video-ref"]');
     if (videoRef) {
@@ -759,18 +745,20 @@
       if (!slider) return;
       state.vodVideo.volume = parseFloat(slider.value);
     }, true);
+  }
 
-    // Intercept mute/unmute button
-    const muteBtn = document.querySelector('[data-a-target="player-mute-unmute-button"]');
-    if (muteBtn) {
-      muteBtn.addEventListener('click', () => {
-        if (!state.isRewinding || !state.vodVideo) return;
-        // Toggle after Twitch processes it — use a microtask
-        queueMicrotask(() => {
-          state.vodVideo.muted = !state.vodVideo.muted;
-        });
-      }, true);
-    }
+  // Intercept the native play/pause button via delegation so the hook
+  // survives Twitch re-rendering the control bar
+  function hookNativeButtons() {
+    document.addEventListener('click', (e) => {
+      if (!state.isRewinding || !state.vodVideo) return;
+      if (!e.target.closest('[data-a-target="player-play-pause-button"]')) return;
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      const vod = state.vodVideo;
+      vod.paused ? vod.play().catch(() => {}) : vod.pause();
+      updatePlayPauseIcon();
+    }, true);
   }
 
   // ─── Native audio mute (event-driven) ──────────────────────────────────────
@@ -779,10 +767,13 @@
   let videoObserver = null;
 
   function onNativeVolumeChange() {
-    if (state.isRewinding && this.volume > 0) {
-      this._trSavedVolume = this._trSavedVolume || this.volume;
+    if (!state.isRewinding) return;
+    if (this.volume > 0) {
+      this._trSavedVolume = this.volume; // remember last non-zero for restore
       this.volume = 0;
     }
+    // Mirror mute toggles (button or M key) onto the VOD video
+    if (state.vodVideo) state.vodVideo.muted = this.muted;
   }
 
   function attachMuteListener(vid) {
@@ -1043,35 +1034,41 @@
     else onNavigate();
   });
 
-  // ─── Keyboard shortcuts (global, when on a channel page) ───────────────────
+  // ─── Keyboard shortcuts (capture phase, when rewinding) ──────────────────
 
   const SPEED_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 
   document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     if (!state.vodId || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
     if (!state.isRewinding || !state.vodVideo) return;
 
-    if (e.key === 'ArrowLeft') {
-      state.vodVideo.currentTime = Math.max(0, state.vodVideo.currentTime - SEEK_STEP);
-      e.preventDefault();
+    const vod = state.vodVideo;
+
+    if (e.key === ' ' || e.key.toLowerCase() === 'k') {
+      vod.paused ? vod.play().catch(() => {}) : vod.pause();
+    } else if (e.key === 'ArrowLeft') {
+      vod.currentTime = Math.max(0, vod.currentTime - SEEK_STEP);
     } else if (e.key === 'ArrowRight') {
-      const max = elapsed() - MIN_REWIND_SEC;
-      state.vodVideo.currentTime = Math.min(max, state.vodVideo.currentTime + SEEK_STEP);
-      e.preventDefault();
+      const max = Math.max(0, elapsed() - MIN_REWIND_SEC);
+      vod.currentTime = Math.min(max, vod.currentTime + SEEK_STEP);
     } else if (e.key === '>' || e.key === '.') {
       // Speed up
-      const cur = state.vodVideo.playbackRate;
-      const next = SPEED_STEPS.find((s) => s > cur);
-      if (next) { state.vodVideo.playbackRate = next; log('Speed →', next + 'x'); }
-      e.preventDefault();
+      const next = SPEED_STEPS.find((s) => s > vod.playbackRate);
+      if (next) { vod.playbackRate = next; log('Speed →', next + 'x'); }
     } else if (e.key === '<' || e.key === ',') {
       // Slow down
-      const cur = state.vodVideo.playbackRate;
-      const prev = [...SPEED_STEPS].reverse().find((s) => s < cur);
-      if (prev) { state.vodVideo.playbackRate = prev; log('Speed →', prev + 'x'); }
-      e.preventDefault();
+      const prev = [...SPEED_STEPS].reverse().find((s) => s < vod.playbackRate);
+      if (prev) { vod.playbackRate = prev; log('Speed →', prev + 'x'); }
+    } else {
+      return;
     }
-  });
+    // Capture phase + stopImmediatePropagation keeps Twitch's own key
+    // handler (which drives the native player) out of the way while rewinding
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    updatePlayPauseIcon();
+  }, true);
 
   // ─── Init ──────────────────────────────────────────────────────────────────
 
@@ -1080,6 +1077,7 @@
     hookNavigation();
     hookQualityMenu();
     hookVolumeSlider();
+    hookNativeButtons();
     hookSpeedMenu();
     hookCopyUrl();
     document.addEventListener('mousemove', onDocMouseMove);
