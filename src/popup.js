@@ -1,9 +1,9 @@
 const toggle = document.getElementById('toggle');
 
-chrome.runtime.sendMessage({ type: 'GET_STATE' }, (res) => {
-  toggle.checked = res?.enabled !== false;
+chrome.storage.local.get('enabled', (data) => {
+  toggle.checked = data.enabled !== false;
 });
 
 toggle.addEventListener('change', () => {
-  chrome.runtime.sendMessage({ type: 'SET_STATE', enabled: toggle.checked });
+  chrome.storage.local.set({ enabled: toggle.checked });
 });

@@ -1,6 +1,9 @@
 // Twitch Rewind — Content Script
 // Runs at document_start. Injects vod-unlock.js immediately (before Twitch scripts),
-// then injects hls.js + inject.js after DOM is ready.
+// then injects hls.js + inject.js after DOM is ready. The enable/disable state lives
+// in chrome.storage, so no background page is required — the page script is kept in
+// sync through chrome.storage.onChanged. This keeps a single manifest for both
+// Chrome and Firefox (no background.service_worker conflict).
 
 (function () {
   'use strict';
@@ -18,29 +21,30 @@
     });
   }
 
-  // Inject VOD unlock ASAP (before Twitch creates its player worker)
-  injectScript('src/vod-unlock.js');
-
-  // Inject rewind scripts after DOM is ready
-  async function initRewind() {
-    await injectScript('lib/hls.min.js');
-    await injectScript('src/inject.js');
-
-    chrome.runtime.sendMessage({ type: 'GET_STATE' }, (response) => {
-      if (response) {
-        window.postMessage(
-          { type: 'TWITCH_REWIND_TOGGLE', enabled: response.enabled },
-          '*',
-        );
-      }
+  function pushToggle() {
+    chrome.storage.local.get('enabled', (data) => {
+      window.postMessage(
+        { type: 'TWITCH_REWIND_TOGGLE', enabled: data.enabled !== false },
+        '*',
+      );
     });
   }
 
-  // Listen for state changes from background
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === 'STATE_CHANGED') {
+  // Inject VOD unlock ASAP (before Twitch creates its player worker)
+  injectScript('src/vod-unlock.js');
+
+  // Inject rewind scripts after DOM is ready, then push the initial state
+  async function initRewind() {
+    await injectScript('lib/hls.min.js');
+    await injectScript('src/inject.js');
+    pushToggle();
+  }
+
+  // Push state changes (e.g. popup toggle) back to the page script
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.enabled) {
       window.postMessage(
-        { type: 'TWITCH_REWIND_TOGGLE', enabled: msg.enabled },
+        { type: 'TWITCH_REWIND_TOGGLE', enabled: changes.enabled.newValue !== false },
         '*',
       );
     }
