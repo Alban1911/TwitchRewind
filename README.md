@@ -6,17 +6,29 @@
 
 <p align="center">
   <strong>Rewind any live Twitch stream and unlock sub-only VODs.</strong><br>
-  A lightweight Chrome extension that adds a seekbar to live streams and plays subscriber-only VODs — no subscription needed.
+  A lightweight extension for Chrome/Chromium and Firefox that adds a seekbar to live streams and plays subscriber-only VODs — no subscription needed.
 </p>
 
 ## Installation
 
-> Not on the Chrome Web Store yet — install it manually:
+> Not on any store yet — install it manually:
 
-1. Download the repository: **Code → Download ZIP** on [GitHub](https://github.com/Alban1911/TwitchRewind) (or `git clone`), then unzip it
-2. Open `chrome://extensions` in Chrome
-3. Enable **Developer mode** (top-right toggle)
-4. Click **Load unpacked** and select the `TwitchRewind` folder
+Download the repository: **Code → Download ZIP** on [GitHub](https://github.com/Alban1911/TwitchRewind) (or `git clone`), then unzip it.
+
+### Chrome / Chromium
+
+1. Open `chrome://extensions`
+2. Enable **Developer mode** (top-right toggle)
+3. Click **Load unpacked** and select the `TwitchRewind` folder
+
+### Firefox
+
+1. **Temporary (dev):** open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on…**, and select the `manifest.json` file (temporary add-ons unload when the browser closes)
+2. **Permanent:** package the folder as an add-on and install it from `about:addons`:
+   ```
+   cd TwitchRewind && zip -r twitch-rewind.xpi . -x ".git/*"
+   ```
+   Then drag `twitch-rewind.xpi` onto `about:addons`. On browsers that enforce add-on signing, set `xpinstall.signatures.required` to `false` in `about:config` first (or submit the add-on for review on [addons.mozilla.org](https://addons.mozilla.org)).
 
 ## Usage
 
@@ -42,7 +54,6 @@ Volume, quality, and play/pause keep working through Twitch's native controls th
 - You can seek up to ~15 seconds behind the live edge (recent VOD segments take a moment to become available)
 - On channels you're subscribed to, the extension stays out of the way — you already have native VOD access
 - No tracking, no analytics
-- Chrome/Chromium only; not tested in Firefox
 
 ## Credits
 

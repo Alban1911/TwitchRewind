@@ -5,21 +5,20 @@ Contributions are welcome! Here's how to get started.
 ## Setting up the development environment
 
 1. Fork and clone the repository
-2. Load the extension in Chrome as described in the [README](README.md#installation)
-3. Make your changes — after editing, go to `chrome://extensions` and click the **reload** button on the extension card
+2. Load the extension as described in the [README](README.md#installation): **Chrome/Chromium** — `chrome://extensions` → Developer mode → Load unpacked; **Firefox** — `about:debugging#/runtime/this-firefox` → Load Temporary Add-on… → `manifest.json`
+3. Make your changes, then reload: in Chrome click **reload** on the extension card; in Firefox click **Reload** next to the add-on in `about:debugging`
 4. Test on a live Twitch channel
 
-There is no build step and no dependencies to install — the extension is plain JavaScript loaded directly by Chrome.
+The extension is plain JavaScript with no build step and no framework — the same `manifest.json` and source files run in both Chrome/Chromium and Firefox.
 
 ## Project structure
 
 ```
-manifest.json          Chrome Extension manifest (Manifest V3)
+manifest.json          WebExtension manifest (Manifest V3) — shared by Chrome/Chromium and Firefox
 src/
   vod-unlock.js        Worker patch — intercepts fetch for sub-only VOD bypass
-  content.js           Content script — injects scripts at document_start
+  content.js           Content script — injects page scripts; syncs state via chrome.storage
   inject.js            Page script — core logic (VOD detection, playback, native UI injection)
-  background.js        Service worker — manages enable/disable state
   popup.html / .js     Extension popup — toggle switch
   styles.css           Styles for injected controls (seekbar, LIVE)
 lib/
@@ -35,10 +34,14 @@ The file you'll touch most is **`src/inject.js`** — all rewind logic, UI injec
 1. **VOD unlock** — At `document_start`, `vod-unlock.js` patches the `Worker` constructor to intercept `self.fetch` inside Twitch's Amazon IVS worker. When a Usher VOD request returns 403 (subscriber-only), it builds a synthetic m3u8 playlist from direct CDN URLs, making sub-only VODs play natively.
 2. **Channel detection** — `inject.js` parses the URL for the channel and hooks `history.pushState`/`replaceState` to track SPA navigation.
 3. **Subscription check** — On a live channel, the extension checks via Twitch's GQL API whether you're subscribed; if so, it skips entirely (you already have native VOD access).
-4. **VOD pre-loading** — Otherwise it finds the currently recording VOD, fetches a playback token, and pre-loads the HLS manifest in the background so the first rewind is nearly instant.
+4. **VOD pre-loading** — Otherwise it finds the currently recording VOD, fetches a playback token, and pre-loads the HLS manifest silently so the first rewind is nearly instant.
 5. **Controls injection** — A seekbar and LIVE button are injected into Twitch's native player controls. A MutationObserver re-injects them when React re-renders the controls.
 6. **Rewind** — Dragging the seekbar backward shows a second video (the VOD) on top of the native one, mutes the native player (event-driven), and syncs volume and quality from Twitch's native controls.
 7. **Return to live** — LIVE pauses and hides the VOD video (HLS stays warm for instant re-rewind), unmutes the native player, and resumes live playback.
+
+State flow: popup and content scripts read/write `chrome.storage.local` directly; content scripts react to
+`chrome.storage.onChanged`. There is deliberately no background page — a `background.service_worker` key
+would prevent the manifest from loading in Firefox builds that disable MV3 service workers.
 
 ### Sub-only VOD bypass
 
@@ -47,6 +50,7 @@ For subscriber-only VODs the standard token request fails, so the extension quer
 ## Guidelines
 
 - Keep it simple — this extension is intentionally minimal with no build step and no framework
+- Test in both Chrome/Chromium and Firefox — the code must stay identical across browsers
 - Test with both regular and subscriber-only VOD channels
 - Test SPA navigation (switching channels without a full page reload)
 - Make sure the native Twitch player is fully restored when exiting rewind mode (volume, quality, play state)
