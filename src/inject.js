@@ -9,6 +9,7 @@
   const GQL_URL = 'https://gql.twitch.tv/gql';
   const VOD_CHECK_INTERVAL = 30000;
   const UI_TICK = 500;
+  const CONTROLS_KEEPALIVE = 2000; // re-arm Twitch's 5 s hide-controls timer while on the seekbar
   const FETCH_TIMEOUT = 10000;
   const SEEK_STEP = 10;
   const MIN_REWIND_SEC = 15;
@@ -1168,6 +1169,21 @@
   function uiTick() {
     ensureUi();
     updateSeek();
+    keepControlsUp();
+  }
+
+  // Twitch hides its controls 5 s after they last appeared, and ignores
+  // mouse moves until then — so with the pointer resting on the seekbar
+  // (looking at previews) they faded out, and moving brought them back.
+  // While the pointer is on the seekbar or dragging, re-arm that timer the
+  // way entering the player does (video-ref's mouseenter handler)
+  let controlsKeptAt = 0;
+  function keepControlsUp() {
+    const sb = state.ui.seekbar;
+    if (!sb || !(seekDragging || sb.el.matches(':hover'))) return;
+    if (Date.now() - controlsKeptAt < CONTROLS_KEEPALIVE) return;
+    controlsKeptAt = Date.now();
+    sb.el.closest('[data-a-target="video-ref"]')?.dispatchEvent(new MouseEvent('mouseenter', { relatedTarget: null }));
   }
 
   function scheduleUiRepair() {
