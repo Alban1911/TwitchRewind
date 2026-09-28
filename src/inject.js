@@ -60,9 +60,9 @@
     const h = Math.floor(sec / 3600);
     const m = Math.floor((sec % 3600) / 60);
     const s = sec % 60;
-    return h > 0
-      ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-      : `${m}:${String(s).padStart(2, '0')}`;
+    const pad = (n) => String(n).padStart(2, '0');
+    // Hours on two digits, like Twitch's own seekbar: 01:59:11
+    return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
   }
 
   function elapsed() {
@@ -1036,12 +1036,11 @@
 
     liveLabel.appendChild(liveText);
 
-    // Skip-to-end icon (native Twitch glyph). The viewBox is cropped to the
-    // glyph's bounds so styles.css can size it to the LIVE text
+    // Skip-to-end icon: Twitch's own glyph, in its 24-unit box shown at 18 px
     const skipSvg = document.createElementNS(SVG_NS, 'svg');
-    skipSvg.setAttribute('width', '9');
-    skipSvg.setAttribute('height', '10');
-    skipSvg.setAttribute('viewBox', '5 4 14 16');
+    skipSvg.setAttribute('width', '18');
+    skipSvg.setAttribute('height', '18');
+    skipSvg.setAttribute('viewBox', '0 0 24 24');
     skipSvg.setAttribute('fill', 'currentColor');
     const skipPath = document.createElementNS(SVG_NS, 'path');
     skipPath.setAttribute('d', 'M5.794 4.578 16 12 5.794 19.422A.5.5 0 0 1 5 19.018V4.982a.5.5 0 0 1 .794-.404ZM17 4h2v16h-2V4Z');
@@ -1139,6 +1138,16 @@
     seekDragging = false;
   }
 
+  // Twitch's own seekbar showed up: hand the player back. The watchdog keeps
+  // running, so the controls come back if Twitch's seekbar goes away
+  function stepAside() {
+    if (state.isRewinding || state.loadingRewind) goLive();
+    document.getElementById('tr-seekbar-area')?.remove();
+    state.ui = {};
+    seekDragging = false;
+    log("Twitch's own rewind is available on this channel: stepping aside");
+  }
+
   // ─── UI lifecycle (self-healing) ─────────────────────────────────────────
   // Twitch re-renders or replaces parts of the player whenever it likes
   // (content-classification gate, ads, reconnects). Instead of trusting one
@@ -1206,6 +1215,12 @@
     }
 
     const controls = nativeControls();
+    // Twitch's own rewind (subscribers, Turbo) puts its seekbar in this
+    // control bar: step aside rather than stack a second one on top
+    if (controls?.querySelector('[data-a-target="player-seekbar"]')) {
+      if (state.ui.seekArea) stepAside();
+      return;
+    }
     const area = state.ui.seekArea;
     if (controls && !(area?.isConnected && controls.contains(area))) injectControls(controls);
 

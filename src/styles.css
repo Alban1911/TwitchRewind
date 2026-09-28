@@ -34,62 +34,55 @@
   margin: 0;
 }
 
-/* LIVE label (text + skip-to-end icon, visible when rewinding). Both states
-   are the same box: fixed height, and at the live edge the icon keeps its
-   (hidden) slot so the width matches too — starting or ending a rewind never
-   resizes the button or the control bar */
+/* LIVE label, Twitch's two looks. While rewinding: the dark "LIVE ⏭" pill
+   that jumps back to live. At the live edge: the red status badge, not
+   clickable. Both are one text line high, so switching never resizes the
+   control bar (the badge is right-aligned, so its width can change) */
 .tr-live-label {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
   box-sizing: border-box;
-  height: 17px;
-  cursor: pointer;
-  color: #efeff1;
-  background: rgba(255, 255, 255, 0.15);
+  height: 19.6px;
+  padding: 0 4px;
+  margin: 0;
   border: none;
   border-radius: 4px;
-  padding: 0 6px;
-  margin: 0;
+  background: #323239;
+  color: #efeff1;
+  cursor: pointer;
   outline: none;
-  transition: background-color 0.1s ease;
-}
-
-.tr-live-label:hover {
-  background: rgba(255, 255, 255, 0.25);
-}
-
-.tr-live-label--at-live {
-  background: #eb0400;
-}
-
-.tr-live-label--at-live:hover {
-  background: #c50300;
-}
-
-.tr-live-label--at-live svg {
-  visibility: hidden;
-}
-
-/* Re-center the text over the reserved slot: half of (icon 9px + gap 4px) */
-.tr-live-label--at-live .tr-live-text {
-  transform: translateX(6.5px);
 }
 
 .tr-live-text {
   font-family: Inter, 'Noto Sans Arabic', Roobert, 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  font-size: 13px;
-  font-weight: 700;
-  color: #efeff1;
-  line-height: 1;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: inherit;
 }
 
-/* Skip-to-end glyph sized to the text's cap height (viewBox is cropped to the glyph) */
 .tr-live-label svg {
-  width: 9px;
-  height: 10px;
+  width: 18px;
+  height: 18px;
   flex-shrink: 0;
   fill: currentColor;
+}
+
+.tr-live-label--at-live {
+  padding: 1px 5px;
+  background: #eb0400;
+  color: #fff;
+  cursor: default;
+  pointer-events: none;
+}
+
+.tr-live-label--at-live .tr-live-text {
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.tr-live-label--at-live svg {
+  display: none;
 }
 
 /* Bottom row: [seekbar] [red dot] */
@@ -122,29 +115,27 @@
   align-items: center;
 }
 
-/* Played/filled portion (Twitch purple) */
+/* Played/filled portion (the purple of Twitch's own rewind seekbar) */
 .tr-seekbar-played {
   position: absolute;
   left: 0;
   top: 0;
   height: 100%;
   border-radius: 4px;
-  background: #9147ff;
+  background: #a970ff;
   pointer-events: none;
 }
 
-/* Scrubber thumb */
+/* Scrubber thumb: shown only while hovering or dragging, like Twitch's */
 .tr-seekbar-thumb {
   position: absolute;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: #fff;
-  box-shadow: 0 0 2px rgba(0, 0, 0, 0.3);
   transform: translate(-50%, -50%);
   top: 50%;
   opacity: 0;
-  transition: opacity 0.15s ease;
   pointer-events: none;
   z-index: 1;
 }
@@ -158,19 +149,21 @@
   opacity: 0 !important;
 }
 
-/* Hover tooltip */
+/* Hover tooltip (Twitch's balloon: it sits right on the bar's row) */
 .tr-seekbar-tooltip {
   position: absolute;
   bottom: 100%;
-  margin-bottom: 8px;
   transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.8);
-  color: #efeff1;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.6), 0 0 4px rgba(0, 0, 0, 0.4);
+  color: #fff;
   font-family: Inter, 'Noto Sans Arabic', Roobert, 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  font-size: 13px;
-  font-weight: 700;
-  padding: 3px 6px;
-  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.4;
+  padding: 0 4px;
   white-space: nowrap;
   pointer-events: none;
   display: none;
@@ -190,14 +183,10 @@
   position: static;
   width: 160px;
   height: 90px;
-  margin-bottom: 3px;
-  border-radius: 2px;
+  margin-top: 4px;
+  border-radius: 3px;
   background: #000;
   transition: opacity 0.15s ease;
-}
-
-.tr-seekbar-tooltip--preview {
-  padding: 3px 3px 2px;
 }
 
 .tr-seekbar-tooltip--preview .tr-seekbar-preview {
@@ -209,7 +198,7 @@
   opacity: 0.35;
 }
 
-/* --- Red live dot (end of seekbar row) --- */
+/* --- Red live dot (end of seekbar row, only while rewinding, like Twitch's) --- */
 .tr-live-dot {
   display: flex;
   align-items: center;
@@ -217,11 +206,15 @@
   width: 8px;
   height: 8px;
   padding: 0;
-  margin-left: 6px;
+  margin-left: 8px;
   border: none;
   background: transparent;
-  cursor: pointer;
+  cursor: default;
   flex-shrink: 0;
+}
+
+.tr-seekbar--live + .tr-live-dot {
+  display: none;
 }
 
 .tr-live-dot-indicator {

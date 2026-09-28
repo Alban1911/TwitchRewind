@@ -32,10 +32,10 @@ Temporary add-ons are removed when Firefox closes, so repeat these steps after a
 
 ## Usage
 
-1. Open any **live** Twitch channel (where you're not subscribed)
-2. A seekbar and a **LIVE** button appear in the player controls
-3. **Hover the seekbar** to preview any moment of the stream, then **click or drag** to rewind — the channel's VOD plays from the frame you saw
-4. Click **LIVE** (or the red dot at the end of the seekbar) to jump back to the live edge
+1. Open any **live** Twitch channel
+2. A seekbar and a **LIVE** badge appear in the player controls, with the look of Twitch's own rewind
+3. **Hover the seekbar** to preview any moment of the stream (a frame every 2 seconds), then **click or drag** to rewind — the channel's VOD plays from exactly the frame you saw
+4. Click **LIVE ⏭** (or the red dot at the end of the seekbar) to jump back to the live edge
 
 While rewinding:
 
@@ -53,7 +53,7 @@ Volume, quality, and play/pause keep working through Twitch's native controls th
 - The streamer must have VOD saving enabled — otherwise there's nothing to rewind
 - You can seek up to ~15 seconds behind the live edge (recent VOD segments take a moment to become available)
 - Seekbar previews download a single frame for the spot you hover (streams have one every 2 seconds) — tens of KB, or a few hundred KB on channels without transcodes — and are cached
-- On channels you're subscribed to, the extension stays out of the way — you already have native VOD access
+- Where Twitch offers its own rewind (channels you're subscribed to, or everywhere with Turbo), the extension stays out of the way and leaves you Twitch's seekbar
 - No tracking, no analytics
 
 ## Credits
