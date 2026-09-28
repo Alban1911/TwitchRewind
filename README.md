@@ -23,12 +23,12 @@ Download the repository: **Code → Download ZIP** on [GitHub](https://github.co
 
 ### Firefox
 
-1. **Temporary (dev):** open `about:debugging#/runtime/this-firefox`, click **Load Temporary Add-on…**, and select the `manifest.json` file (temporary add-ons unload when the browser closes)
-2. **Permanent:** package the folder as an add-on and install it from `about:addons`:
-   ```
-   cd TwitchRewind && zip -r twitch-rewind.xpi . -x ".git/*"
-   ```
-   Then drag `twitch-rewind.xpi` onto `about:addons`. On browsers that enforce add-on signing, set `xpinstall.signatures.required` to `false` in `about:config` first (or submit the add-on for review on [addons.mozilla.org](https://addons.mozilla.org)).
+Requires Firefox 127 or later. Firefox only keeps signed add-ons installed, and Twitch Rewind isn't signed yet, so load it as a temporary add-on:
+
+1. Open `about:debugging#/runtime/this-firefox`
+2. Click **Load Temporary Add-on…** and select the `manifest.json` file in the `TwitchRewind` folder
+
+Temporary add-ons are removed when Firefox closes, so repeat these steps after a restart. Firefox Developer Edition, Nightly and ESR can keep it installed instead: set `xpinstall.signatures.required` to `false` in `about:config`, zip the *contents* of the `TwitchRewind` folder (`manifest.json` at the root of the archive), rename the zip to `.xpi` and open it in Firefox.
 
 ## Usage
 

@@ -39,9 +39,10 @@ The file you'll touch most is **`src/inject.js`** — all rewind logic, UI injec
 6. **Rewind** — Dragging the seekbar backward shows a second video (the VOD) on top of the native one, mutes the native player (event-driven), and syncs volume and quality from Twitch's native controls.
 7. **Return to live** — LIVE pauses and hides the VOD video (HLS stays warm for instant re-rewind), unmutes the native player, and resumes live playback.
 
-State flow: popup and content scripts read/write `chrome.storage.local` directly; content scripts react to
-`chrome.storage.onChanged`. There is deliberately no background page — a `background.service_worker` key
-would prevent the manifest from loading in Firefox builds that disable MV3 service workers.
+State flow: the popup and the content script read and write `chrome.storage.local` directly, and the content script
+reacts to `chrome.storage.onChanged`, so no background page is needed. If one ever is, declare both
+`background.scripts` (used by Firefox) and `background.service_worker` (used by Chrome) — both browsers accept a
+manifest with the two keys since version 121.
 
 ### Sub-only VOD bypass
 
