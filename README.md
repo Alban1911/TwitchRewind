@@ -6,12 +6,18 @@
 
 <p align="center">
   <strong>Rewind any live Twitch stream and unlock sub-only VODs.</strong><br>
-  A lightweight extension for Chrome/Chromium and Firefox that adds a seekbar to live streams and plays subscriber-only VODs — no subscription needed.
+  A lightweight extension for Chrome/Chromium and Firefox that adds the same seekbar as Twitch's own rewind to every live stream — plus frame previews Twitch doesn't have — and plays subscriber-only VODs, no subscription needed.
 </p>
 
 <p align="center">
   <img src="docs/screenshot-rewind.jpg" width="700" alt="Rewinding a live stream: hovering the seekbar shows a preview of that moment, and LIVE jumps back to the live edge">
 </p>
+
+## Features
+
+- **The same seekbar as Twitch's own rewind** — Twitch keeps its rewind for subscribers and Turbo users; this brings the same bar to any live stream, down to the colors, thumb, time balloon and LIVE badge
+- **Previews Twitch doesn't have** — Twitch's bar only shows a time; hover this one to see the frame at that moment (one every 2 seconds), and click to rewind to exactly that frame
+- **Sub-only VODs** — watch subscriber-only VODs without subscribing
 
 ## Installation
 
