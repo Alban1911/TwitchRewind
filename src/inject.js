@@ -1,6 +1,6 @@
 // Twitch Rewind — Injected Page Script
 // Injects rewind controls directly into Twitch's native player UI.
-// Seekbar + skip buttons + LIVE appear in the native control bar.
+// Seekbar + LIVE appear in the native control bar.
 
 (function () {
   'use strict';
@@ -8,8 +8,12 @@
   const TWITCH_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
   const GQL_URL = 'https://gql.twitch.tv/gql';
   const VOD_CHECK_INTERVAL = 30000;
+  const UI_TICK = 500;
+  const FETCH_TIMEOUT = 10000;
   const SEEK_STEP = 10;
   const MIN_REWIND_SEC = 15;
+  const HLS_RECOVERY_LIMIT = 3; // fatal-error recoveries allowed per minute
+  const SVG_NS = 'http://www.w3.org/2000/svg';
 
   const state = {
     enabled: true,
@@ -22,11 +26,12 @@
     hlsReady: false,     // manifest loaded, ready to seek instantly
     vodVideo: null,
     ui: {},
-    seekInterval: null,
+    uiTimer: null,         // watchdog tick: keeps the controls mounted and current
     vodCheckInterval: null,
     preloading: false,     // preload (URL fetch + HLS setup) in flight
     loadingRewind: false,  // rewind HLS setup in flight
     pendingSeek: null,     // seek requested while a load is in flight
+    rewindSeq: 0,          // bumped by goLive so an in-flight rewind load knows it was cancelled
     subscribed: null,      // cached subscription check for the current channel
     vodMisses: 0,          // consecutive VOD checks that found no recording
   };
@@ -38,8 +43,15 @@
   }
 
   function getAuthToken() {
-    const match = document.cookie.match(/auth-token=([^;]+)/);
+    const match = document.cookie.match(/(?:^|;\s*)auth-token=([^;]+)/);
     return match ? match[1] : null;
+  }
+
+  // A hung request must not hold the in-flight guards (checkInFlight,
+  // preloading, loadingRewind) forever
+  function fetchWithTimeout(url, opts = {}) {
+    const signal = AbortSignal.timeout ? AbortSignal.timeout(FETCH_TIMEOUT) : undefined;
+    return fetch(url, { ...opts, signal });
   }
 
   function formatTime(sec) {
@@ -63,32 +75,42 @@
     const headers = { 'Client-ID': TWITCH_CLIENT_ID, 'Content-Type': 'application/json' };
     const token = getAuthToken();
     if (token) headers['Authorization'] = `OAuth ${token}`;
-    const res = await fetch(GQL_URL, { method: 'POST', headers, body: JSON.stringify(body) });
+    const res = await fetchWithTimeout(GQL_URL, { method: 'POST', headers, body: JSON.stringify(body) });
     if (!res.ok) throw new Error(`GQL ${res.status}`);
     return res.json();
   }
 
+  function gqlError(data, what) {
+    return new Error(`${what} failed${data?.errors?.length ? `: ${data.errors[0].message}` : ''}`);
+  }
+
+  // true/false, or null when the check itself failed (retried on the next poll)
   async function isSubscribed(login) {
     try {
       const data = await gql({
         query: `query($login:String!){user(login:$login){self{subscriptionBenefit{id}}}}`,
         variables: { login },
       });
+      if (!data?.data?.user && data?.errors?.length) return null;
       return !!data?.data?.user?.self?.subscriptionBenefit?.id;
-    } catch (_) { return false; }
+    } catch (_) { return null; }
   }
 
+  // The VOD currently being recorded (= current live stream), or null when there
+  // is none. Throws when Twitch answers with a partial failure (HTTP 200 +
+  // errors, missing fields) — that must not count as "stream ended", or two
+  // hiccups in a row would tear the controls down mid-stream
   async function fetchCurrentVod(login) {
     const data = await gql({
       query: `query($login:String!){user(login:$login){videos(first:5,sort:TIME,type:ARCHIVE){edges{node{id createdAt status}}}}}`,
       variables: { login },
     });
-    const edges = data?.data?.user?.videos?.edges;
-    if (!edges?.length) return null;
-    // Prefer the VOD currently being recorded (= current live stream)
-    const recording = edges.find((e) => e.node.status === 'RECORDING');
-    if (recording) return recording.node;
-    return null;
+    const user = data?.data?.user;
+    if (user === null && !data?.errors?.length) return null; // no such channel
+    const edges = user?.videos?.edges;
+    if (!Array.isArray(edges)) throw gqlError(data, 'VOD lookup');
+    const recording = edges.find((e) => e?.node?.status === 'RECORDING');
+    return recording ? recording.node : null;
   }
 
   async function fetchVodToken(vodId) {
@@ -142,11 +164,26 @@
       const url = buildDirectVodUrl(meta, vodId, q);
       if (!url) continue;
       try {
-        const res = await fetch(url, { method: 'HEAD' });
+        const res = await fetchWithTimeout(url, { method: 'HEAD' });
         if (res.ok) { log('Direct CDN quality found:', q); return url; }
       } catch (_) {}
     }
     return null;
+  }
+
+  // Playable URL for a VOD: the usher playlist when the token grants access,
+  // otherwise a direct CDN playlist (sub-only VODs). Touches no state, so
+  // callers re-check staleness once after it resolves
+  async function resolveVodUrl(vodId) {
+    const tok = await fetchVodToken(vodId);
+    if (tok) {
+      const url = vodPlaylistUrl(vodId, tok.value, tok.signature);
+      try {
+        const check = await fetchWithTimeout(url);
+        if (check.ok) return url;
+      } catch (_) {}
+    }
+    return findDirectVodUrl(vodId);
   }
 
   // ─── DOM helpers ────────────────────────────────────────────────────────────
@@ -158,12 +195,18 @@
     );
   }
 
+  // Only ad markers that are rendered inside the player count: a leftover
+  // (display:none) or page-level ad container must not hide the seekbar
+  const AD_SELECTOR = '[data-a-target="video-ad-label"], [data-test-selector="ad-overlay-component"], .ad-banner-default-container';
+
   function isAdPlaying() {
-    return !!(
-      document.querySelector('[data-a-target="video-ad-label"]') ||
-      document.querySelector('[data-test-selector="ad-overlay-component"]') ||
-      document.querySelector('.ad-banner-default-container')
-    );
+    const c = playerContainer();
+    const root = c && (c.closest('.persistent-player') || c.closest('[data-a-target="video-player"]') || c);
+    if (!root) return false;
+    for (const el of root.querySelectorAll(AD_SELECTOR)) {
+      if (el.getClientRects().length) return true;
+    }
+    return false;
   }
 
   function twitchVideo() {
@@ -172,39 +215,14 @@
     return c.querySelector('video:not(.tr-vod-video)') || null;
   }
 
+  // Prefer the control bar of the main player over any other player on the page
   function nativeControls() {
-    return document.querySelector('[data-a-target="player-controls"]') || document.querySelector('.player-controls');
-  }
-
-  function nativeLeftGroup() {
-    return document.querySelector('.player-controls__left-control-group');
-  }
-
-  function nativeRightGroup() {
-    return document.querySelector('.player-controls__right-control-group');
-  }
-
-  // ─── SVG icons ──────────────────────────────────────────────────────────────
-
-  const ICONS = {
-    play: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2.969V21.03a.5.5 0 0 0 .765.424L20.18 12.424a.5.5 0 0 0 0-.849L5.765 2.546A.5.5 0 0 0 5 2.97Z"/></svg>',
-    pause: '<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M10 4H5v16h5V4Zm9 0h-5v16h5V4Z"/></svg>',
-    skipToEnd: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M5.794 4.578 16 12 5.794 19.422A.5.5 0 0 1 5 19.018V4.982a.5.5 0 0 1 .794-.404ZM17 4h2v16h-2V4Z"/></svg>',
-  };
-
-  function mkBtn(icon, onClick, title) {
-    const wrap = document.createElement('div');
-    wrap.className = 'tr-btn-wrap';
-
-    const b = document.createElement('button');
-    b.className = 'tr-native-btn';
-    b.innerHTML = icon;
-    if (title) b.title = title;
-    b.setAttribute('aria-label', title || '');
-    b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); });
-
-    wrap.appendChild(b);
-    return wrap;
+    const c = playerContainer();
+    return (
+      c?.querySelector('[data-a-target="player-controls"]') ||
+      document.querySelector('[data-a-target="player-controls"]') ||
+      document.querySelector('.player-controls')
+    );
   }
 
   // ─── Quality switching (intercept Twitch's native quality menu) ─────────
@@ -302,27 +320,70 @@
     }, true);
   }
 
+  // ─── Native play/pause button (shows the VOD's state during rewind) ───────
+
+  const PLAY_PATH = 'M5 2.969V21.03a.5.5 0 0 0 .765.424L20.18 12.424a.5.5 0 0 0 0-.849L5.765 2.546A.5.5 0 0 0 5 2.97Z';
+  const PAUSE_PATH = 'M10 4H5v16h5V4Zm9 0h-5v16h5V4Z';
+
+  function playPauseButton() {
+    return document.querySelector('[data-a-target="player-play-pause-button"]');
+  }
+
+  // Twitch swaps in a fresh <svg> whenever the native play state changes, so
+  // the one we draw into keeps its original children (and the button its
+  // label) for restorePlayPauseIcon() — otherwise the icon stays stuck on the
+  // VOD's state after returning to live. Safe to call every tick: writes only
+  // when something changed.
   function updatePlayPauseIcon() {
-    const btn = document.querySelector('[data-a-target="player-play-pause-button"]');
-    if (!btn || !state.isRewinding || !state.vodVideo) return;
-    const svg = btn.querySelector('svg');
+    if (!state.isRewinding || !state.vodVideo) return;
+    const btn = playPauseButton();
+    const svg = btn?.querySelector('svg');
     if (!svg) return;
     const paused = state.vodVideo.paused;
-    svg.innerHTML = paused
-      ? '<path d="M5 2.969V21.03a.5.5 0 0 0 .765.424L20.18 12.424a.5.5 0 0 0 0-.849L5.765 2.546A.5.5 0 0 0 5 2.97Z"></path>'
-      : '<path d="M10 4H5v16h5V4Zm9 0h-5v16h5V4Z"></path>';
-    btn.setAttribute('aria-label', paused ? 'Play' : 'Pause');
+    const d = paused ? PLAY_PATH : PAUSE_PATH;
+    if (svg._trPath !== d) {
+      if (!svg._trNative) svg._trNative = [...svg.childNodes];
+      const path = document.createElementNS(SVG_NS, 'path');
+      path.setAttribute('d', d);
+      svg.replaceChildren(path);
+      svg._trPath = d;
+    }
+    const label = paused ? 'Play' : 'Pause';
+    const current = btn.getAttribute('aria-label');
+    if (current !== btn._trLabel) btn._trNativeLabel = current; // React re-rendered it since
+    if (current !== label) btn.setAttribute('aria-label', label);
+    btn._trLabel = label;
+  }
+
+  function restorePlayPauseIcon() {
+    const btn = playPauseButton();
+    const svg = btn?.querySelector('svg');
+    if (svg?._trNative) {
+      svg.replaceChildren(...svg._trNative);
+      delete svg._trNative;
+      delete svg._trPath;
+    }
+    if (btn && btn._trLabel !== undefined) {
+      if (btn.getAttribute('aria-label') === btn._trLabel && btn._trNativeLabel != null) {
+        btn.setAttribute('aria-label', btn._trNativeLabel);
+      }
+      delete btn._trLabel;
+      delete btn._trNativeLabel;
+    }
   }
 
   // ─── Seekbar drag (document-level so re-injection never leaks listeners) ───
 
   let seekDragging = false;
 
+  // Pointer position as a fraction of the seekbar, or null when the bar isn't
+  // laid out (hidden during an ad, or detached by a re-render) — a zero-width
+  // rect would otherwise read as 0% and jump the rewind to 0:00
   function seekPctFromEvent(el, e) {
+    if (!el.isConnected) return null;
     const rect = el.getBoundingClientRect();
-    return rect.width > 0
-      ? Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-      : 0;
+    if (rect.width <= 0) return null;
+    return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
   }
 
   function clampSeekSeconds(pct) {
@@ -330,14 +391,22 @@
     return Math.min(pct * total, Math.max(0, total - MIN_REWIND_SEC));
   }
 
+  // Seek while dragging: directly once the VOD is ready, otherwise queue it
+  // for the MANIFEST_PARSED handler of the load in flight
+  function dragSeek(sec) {
+    if (state.isRewinding && state.hlsReady && state.vodVideo) state.vodVideo.currentTime = sec;
+    else if (state.loadingRewind || state.isRewinding) state.pendingSeek = sec;
+  }
+
   function onDocMouseMove(e) {
+    // Button no longer held: the mouseup happened somewhere we didn't see it
+    if (seekDragging && !(e.buttons & 1)) onDocMouseUp();
     const sb = state.ui.seekbar;
     if (!sb) return;
-    if (seekDragging && state.vodVideo) {
-      state.vodVideo.currentTime = clampSeekSeconds(seekPctFromEvent(sb.el, e));
-    }
+    const pct = seekPctFromEvent(sb.el, e);
+    if (pct === null) return;
+    if (seekDragging) dragSeek(clampSeekSeconds(pct));
     if (seekDragging || sb.el.matches(':hover')) {
-      const pct = seekPctFromEvent(sb.el, e);
       sb.tooltip.textContent = formatTime(pct * elapsed());
       sb.tooltip.style.left = (pct * 100) + '%';
     }
@@ -352,12 +421,9 @@
 
   // ─── Inject controls into native Twitch UI ─────────────────────────────────
 
-  function injectControls() {
+  // Only called by ensureUi(), which decides when the controls need (re)building
+  function injectControls(controls) {
     document.getElementById('tr-seekbar-area')?.remove();
-
-
-    const controls = nativeControls();
-    if (!controls) return;
 
     // ── Seekbar area (above the button section) ──────────────────────────
     const seekArea = document.createElement('div');
@@ -372,9 +438,10 @@
     curLabel.className = 'tr-elapsed';
     curLabel.textContent = formatTime(elapsed());
 
+    // Re-injection can happen mid-rewind, so start from the current state
     const liveLabel = document.createElement('div');
     liveLabel.id = 'tr-live-label';
-    liveLabel.className = 'tr-live-label tr-live-label--at-live';
+    liveLabel.className = state.isRewinding ? 'tr-live-label' : 'tr-live-label tr-live-label--at-live';
     liveLabel.tabIndex = 0;
     liveLabel.setAttribute('role', 'button');
     liveLabel.setAttribute('aria-label', 'Skip to Live');
@@ -386,13 +453,12 @@
     liveLabel.appendChild(liveText);
 
     // Skip-to-end icon (native Twitch SVG, 20x20)
-    const skipSvgNS = 'http://www.w3.org/2000/svg';
-    const skipSvg = document.createElementNS(skipSvgNS, 'svg');
+    const skipSvg = document.createElementNS(SVG_NS, 'svg');
     skipSvg.setAttribute('width', '20');
     skipSvg.setAttribute('height', '20');
     skipSvg.setAttribute('viewBox', '0 0 24 24');
     skipSvg.setAttribute('fill', 'currentColor');
-    const skipPath = document.createElementNS(skipSvgNS, 'path');
+    const skipPath = document.createElementNS(SVG_NS, 'path');
     skipPath.setAttribute('d', 'M5.794 4.578 16 12 5.794 19.422A.5.5 0 0 1 5 19.018V4.982a.5.5 0 0 1 .794-.404ZM17 4h2v16h-2V4Z');
     skipSvg.appendChild(skipPath);
     liveLabel.appendChild(skipSvg);
@@ -453,47 +519,93 @@
     // ── Seekbar interaction (drag starts here; move/up are document-level) ──
     seekbar.addEventListener('mousedown', (e) => {
       if (e.button !== 0 || !state.vodId) return;
+      const pct = seekPctFromEvent(seekbar, e);
+      if (pct === null) return;
       e.preventDefault(); // avoid text selection while dragging
       seekDragging = true;
       seekbar.classList.add('tr-seekbar--active');
-      startRewind(clampSeekSeconds(seekPctFromEvent(seekbar, e)));
+      startRewind(clampSeekSeconds(pct));
     });
 
     state.ui.seekArea = seekArea;
     state.ui.seekbar = { el: seekbar, played: seekPlayed, thumb: seekThumb, tooltip: seekTooltip };
     state.ui.curLabel = curLabel;
+    state.ui.liveLabel = liveLabel;
 
-    startSeekUpdates();
+    updateSeek();
     log('Controls injected');
   }
 
   function removeControls() {
-    stopSeekUpdates();
+    stopUi();
     document.getElementById('tr-seekbar-area')?.remove();
-
     state.ui = {};
+    seekDragging = false;
   }
 
-  // Re-inject controls if Twitch re-renders (React)
-  let reinjectObserver;
+  // ─── UI lifecycle (self-healing) ─────────────────────────────────────────
+  // Twitch re-renders or replaces parts of the player whenever it likes
+  // (content-classification gate, ads, reconnects). Instead of trusting one
+  // observer on one container, a watchdog tick checks that the controls are
+  // mounted in the *current* control bar, and an observer on the current
+  // player container repairs the common case (React re-rendering the
+  // controls) within a frame. Both only call ensureUi(), which is idempotent.
 
-  let reinjectPending = false;
+  let uiObserver = null;
+  let uiObservedContainer = null;
+  let uiRepairFrame = 0;
 
-  function watchForReinject() {
-    reinjectObserver?.disconnect();
-    const container = playerContainer();
-    if (!container) return;
-    reinjectObserver = new MutationObserver(() => {
-      if (!state.vodId || reinjectPending) return;
-      if (!document.getElementById('tr-seekbar-area')) {
-        reinjectPending = true;
-        requestAnimationFrame(() => {
-          injectControls();
-          reinjectPending = false;
-        });
-      }
+  function startUi() {
+    if (!state.uiTimer) state.uiTimer = setInterval(uiTick, UI_TICK);
+    ensureUi();
+  }
+
+  function stopUi() {
+    clearInterval(state.uiTimer);
+    state.uiTimer = null;
+    uiObserver?.disconnect();
+    uiObserver = null;
+    uiObservedContainer = null;
+    cancelAnimationFrame(uiRepairFrame);
+    uiRepairFrame = 0;
+  }
+
+  function uiTick() {
+    ensureUi();
+    updateSeek();
+  }
+
+  function scheduleUiRepair() {
+    if (uiRepairFrame) return;
+    uiRepairFrame = requestAnimationFrame(() => {
+      uiRepairFrame = 0;
+      ensureUi();
     });
-    reinjectObserver.observe(container, { childList: true, subtree: true });
+  }
+
+  function ensureUi() {
+    if (!state.enabled || !state.vodId) return;
+
+    const container = playerContainer();
+    if (container && container !== uiObservedContainer) {
+      uiObserver?.disconnect();
+      uiObserver = new MutationObserver(scheduleUiRepair);
+      uiObserver.observe(container, { childList: true, subtree: true });
+      uiObservedContainer = container;
+    }
+
+    const controls = nativeControls();
+    const area = state.ui.seekArea;
+    if (controls && !(area?.isConnected && controls.contains(area))) injectControls(controls);
+
+    if (state.isRewinding) {
+      // muteNative()'s observer is bound to the container the rewind started
+      // in; if Twitch replaced it, a new native <video> must still be muted
+      const nv = twitchVideo();
+      if (nv && nv !== mutedVideoRef) attachMuteListener(nv);
+      if (state.vodVideo && !state.vodVideo.isConnected) reattachVodVideo();
+      updatePlayPauseIcon(); // Twitch may have swapped the icon back
+    }
   }
 
   // ─── VOD video element (sits above native video, below controls) ────────
@@ -560,24 +672,18 @@
   // ─── Pre-load VOD (fetch URL + HLS manifest in background) ────────────────
 
   async function preloadVod() {
-    if (!state.vodId || state.hlsReady || state.preloading) return;
+    // Never replace an existing instance: it may be serving the active rewind.
+    // A broken one is cleared by dropHls(), and the next poll preloads again
+    if (!state.vodId || state.hlsInstance || state.preloading || state.loadingRewind || state.isRewinding) return;
     const vodId = state.vodId;
+    const epoch = navEpoch;
     state.preloading = true;
     log('Pre-loading VOD URL...');
 
     try {
-      let url;
-      const tok = await fetchVodToken(vodId);
-      if (state.vodId !== vodId || state.loadingRewind) return; // channel changed or rewind took over
-      if (tok) {
-        url = vodPlaylistUrl(vodId, tok.value, tok.signature);
-        try {
-          const check = await fetch(url);
-          if (!check.ok) url = null;
-        } catch (_) { url = null; }
-      }
-      if (!url) url = await findDirectVodUrl(vodId);
-      if (state.vodId !== vodId || state.loadingRewind) return;
+      const url = await resolveVodUrl(vodId);
+      // Channel changed, recording rotated, or a rewind took over meanwhile
+      if (epoch !== navEpoch || state.vodId !== vodId || state.loadingRewind || state.isRewinding || state.hlsInstance) return;
       if (!url) { log('VOD URL not available'); return; }
 
       state.vodUrl = url;
@@ -588,23 +694,15 @@
       const video = ensureVodVideo();
       if (!video) return;
 
-      if (state.hlsInstance) state.hlsInstance.destroy();
-
       const hls = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 120, startPosition: -1 });
       state.hlsInstance = hls;
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (state.hlsInstance !== hls) return;
         state.hlsReady = true;
         log('VOD pre-loaded, ready for instant rewind');
       });
-
-      hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (data.fatal) {
-          log('Pre-load HLS error:', data.details);
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-          else { state.hlsReady = false; }
-        }
-      });
+      watchHlsErrors(hls);
 
       hls.loadSource(url);
       hls.attachMedia(video);
@@ -616,22 +714,24 @@
     } catch (e) {
       log('Pre-load failed:', e);
     } finally {
-      state.preloading = false;
+      // cleanup() already reset the flag if the channel changed meanwhile
+      if (epoch === navEpoch) state.preloading = false;
     }
   }
 
   // ─── Rewind (VOD playback) ─────────────────────────────────────────────────
 
   async function startRewind(seekTo) {
-    if (!state.vodId || isAdPlaying()) return;
+    // Ads only block *starting* a rewind; seeking within one keeps working
+    if (!state.vodId || (!state.isRewinding && isAdPlaying())) return;
 
     const maxSeek = Math.max(0, elapsed() - MIN_REWIND_SEC);
     seekTo = Math.max(0, Math.min(seekTo, maxSeek));
 
-    // Already rewinding — just seek
-    if (state.isRewinding && state.vodVideo && state.hlsReady) {
-      state.vodVideo.currentTime = seekTo;
-      return;
+    // Already rewinding — just seek, or queue it while the manifest loads
+    if (state.isRewinding && state.vodVideo) {
+      if (state.hlsReady) { state.vodVideo.currentTime = seekTo; return; }
+      if (state.hlsInstance) { state.pendingSeek = seekTo; return; }
     }
 
     // A load is already in flight — remember the target and apply it on ready
@@ -652,27 +752,24 @@
       state.vodVideo.play().catch(() => {});
       state.isRewinding = true;
       muteNative();
-      document.getElementById('tr-live-label')?.classList.remove('tr-live-label--at-live');
+      updateSeek();
       updatePlayPauseIcon();
       return;
     }
 
     // Not pre-loaded — load now
+    const epoch = navEpoch;
+    const seq = state.rewindSeq;
+    const vodId = state.vodId;
+    // LIVE clicked, channel left or recording rotated while the load was in flight
+    const cancelled = () => epoch !== navEpoch || seq !== state.rewindSeq || state.vodId !== vodId;
     state.loadingRewind = true;
+    state.pendingSeek = null;
     try {
       let url = state.vodUrl;
       if (!url) {
-        const tok = await fetchVodToken(state.vodId);
-        if (!state.vodId) return; // channel changed while fetching
-        if (tok) {
-          url = vodPlaylistUrl(state.vodId, tok.value, tok.signature);
-          try {
-            const check = await fetch(url);
-            if (!check.ok) url = null;
-          } catch (_) { url = null; }
-        }
-        if (!url) url = await findDirectVodUrl(state.vodId);
-        if (!state.vodId) return;
+        url = await resolveVodUrl(vodId);
+        if (cancelled()) return;
         if (!url) { log('Cannot access VOD'); return; }
         state.vodUrl = url;
       }
@@ -682,12 +779,16 @@
       if (typeof Hls === 'undefined' || !Hls.isSupported()) return;
 
       if (state.hlsInstance) state.hlsInstance.destroy();
+      state.hlsReady = false;
 
-      const hls = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 120, startPosition: seekTo });
-      state.hlsInstance = hls;
+      // A seek made while the URL was resolving wins over the original target
+      const start = state.pendingSeek ?? seekTo;
       state.pendingSeek = null;
+      const hls = new Hls({ maxBufferLength: 30, maxMaxBufferLength: 120, startPosition: start });
+      state.hlsInstance = hls;
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (state.hlsInstance !== hls) return;
         state.hlsReady = true;
         log('VOD manifest loaded');
         if (!state.isRewinding) {
@@ -702,15 +803,7 @@
         video.play().catch(() => {});
         updatePlayPauseIcon();
       });
-
-      hls.on(Hls.Events.ERROR, (_e, data) => {
-        if (data.fatal) {
-          log('Fatal HLS error:', data.details);
-          state.vodUrl = null; // URL/token may have expired — refetch on next attempt
-          if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-          else goLive();
-        }
-      });
+      watchHlsErrors(hls);
 
       hls.loadSource(url);
       hls.attachMedia(video);
@@ -718,13 +811,59 @@
       showVodVideo();
       state.isRewinding = true;
       muteNative();
-      document.getElementById('tr-live-label')?.classList.remove('tr-live-label--at-live');
+      updateSeek();
     } catch (err) {
       log('Rewind failed:', err);
-      goLive();
+      if (!cancelled()) goLive();
     } finally {
-      state.loadingRewind = false;
+      // cleanup() already reset the flag if the channel changed meanwhile
+      if (epoch === navEpoch) state.loadingRewind = false;
     }
+  }
+
+  // ─── HLS error recovery ──────────────────────────────────────────────────
+  // hls.js reports an error as fatal once its own retries are exhausted.
+  // Media errors (decode/append) usually recover with recoverMediaError(),
+  // playlist/segment network errors with startLoad(). A few attempts per
+  // minute, then give up cleanly — never loop forever, and never leave a
+  // frozen or black VOD on screen.
+
+  function watchHlsErrors(hls) {
+    let attempts = 0;
+    let windowStart = 0;
+    hls.on(Hls.Events.ERROR, (_e, data) => {
+      if (!data.fatal || state.hlsInstance !== hls) return;
+      const now = Date.now();
+      if (now - windowStart > 60000) { windowStart = now; attempts = 0; }
+      const isMedia = data.type === Hls.ErrorTypes.MEDIA_ERROR;
+      // A failed master playlist can't be resumed with startLoad(): it needs a fresh URL
+      const isNetwork = data.type === Hls.ErrorTypes.NETWORK_ERROR && !String(data.details).startsWith('manifest');
+      const what = `HLS error (${data.details})${state.isRewinding ? ' during rewind' : ''}`;
+      if ((isMedia || isNetwork) && attempts++ < HLS_RECOVERY_LIMIT) {
+        log(`${what}, recovering`);
+        if (isMedia) {
+          // recoverMediaError() re-attaches the media element, which pauses it
+          const media = hls.media;
+          const resume = media && !media.paused;
+          hls.recoverMediaError();
+          if (resume) media.play().catch(() => {});
+        } else {
+          hls.startLoad();
+        }
+        return;
+      }
+      log(`${what}, giving up`);
+      dropHls();
+    });
+  }
+
+  // Tear down a broken HLS instance and forget its (possibly expired) URL, so
+  // the next preload or rewind starts over with a fresh token
+  function dropHls() {
+    if (state.isRewinding) goLive();
+    if (state.hlsInstance) { state.hlsInstance.destroy(); state.hlsInstance = null; }
+    state.hlsReady = false;
+    state.vodUrl = null;
   }
 
   // ─── Volume sync (match VOD volume to native) ─────────────────────────────
@@ -825,6 +964,7 @@
     log('Back to live');
     state.isRewinding = false;
     state.pendingSeek = null;
+    state.rewindSeq++; // cancels a rewind load still in flight
 
     // Pause and hide VOD video (keep HLS alive for instant re-rewind)
     if (state.vodVideo) {
@@ -834,6 +974,7 @@
     hideVodVideo();
 
     unmuteNative();
+    restorePlayPauseIcon();
 
     // Always resume native playback
     requestAnimationFrame(() => {
@@ -842,37 +983,24 @@
       if (nv && nv.paused) nv.play().catch(() => {});
     });
 
-    // Reset seekbar to live edge
-    if (state.ui.seekbar) {
-      state.ui.seekbar.played.style.width = '100%';
-      state.ui.seekbar.thumb.style.left = '100%';
-    }
-    document.getElementById('tr-live-label')?.classList.add('tr-live-label--at-live');
+    updateSeek(); // snap the seekbar and LIVE badge back to the live edge
   }
 
   // ─── Seek updates ──────────────────────────────────────────────────────────
 
-  function startSeekUpdates() {
-    stopSeekUpdates();
-    state.seekInterval = setInterval(updateSeek, 500);
-  }
-
-  function stopSeekUpdates() {
-    clearInterval(state.seekInterval);
-    state.seekInterval = null;
-  }
-
+  // Renders the controls from state; runs every UI tick, after injection and
+  // on rewind/live transitions. state.ui refs are current: ensureUi() rebuilds
+  // them whenever Twitch re-renders the control bar
   function updateSeek() {
-    const seekArea = document.getElementById('tr-seekbar-area');
-    if (seekArea) seekArea.style.display = isAdPlaying() ? 'none' : '';
+    const { seekArea, seekbar, curLabel, liveLabel } = state.ui;
+    if (!seekArea) return;
+    // Hide during ads — but never mid-rewind: a midroll on the (muted, hidden)
+    // live stream must not take away the rewind controls and the LIVE button
+    seekArea.style.display = !state.isRewinding && isAdPlaying() ? 'none' : '';
+    liveLabel?.classList.toggle('tr-live-label--at-live', !state.isRewinding);
 
     const total = elapsed();
     if (total <= 0) return;
-
-    // Use getElementById for elements injected into Twitch's control groups
-    // (React can re-render and replace them, making cached refs stale)
-    const seekbar = state.ui.seekbar;
-    const curLabel = state.ui.curLabel;
 
     if (state.isRewinding && state.vodVideo) {
       const cur = state.vodVideo.currentTime;
@@ -907,7 +1035,10 @@
   function channelFromUrl() {
     const parts = location.pathname.split('/').filter(Boolean);
     if (parts.length !== 1) return null;
-    return KNOWN_ROUTES.has(parts[0].toLowerCase()) ? null : parts[0];
+    // Logins are case-insensitive: /XQC and /xqc are the same channel, so a
+    // case-only URL rewrite must not look like a channel change
+    const ch = parts[0].toLowerCase();
+    return KNOWN_ROUTES.has(ch) ? null : ch;
   }
 
   // Navigation epoch: increments on every channel change so stale async
@@ -917,9 +1048,8 @@
   async function onChannelChange(ch) {
     const epoch = ++navEpoch;
     cleanup();
-    if (!ch) return;
+    if (!ch || !state.enabled) return;
     state.channel = ch;
-    state.subscribed = null;
     log('Channel:', ch);
     await waitForPlayer();
     if (epoch !== navEpoch) return;
@@ -929,17 +1059,26 @@
     state.vodCheckInterval = setInterval(checkVod, VOD_CHECK_INTERVAL);
   }
 
-  let checkInFlight = false;
+  // Epoch of the check in flight: a superseded check must neither block the
+  // new channel's first check nor apply its result to the new channel
+  let checkInFlight = null;
 
   async function checkVod() {
-    if (!state.channel || checkInFlight) return;
-    checkInFlight = true;
+    const epoch = navEpoch;
+    const channel = state.channel;
+    if (!channel || !state.enabled || checkInFlight === epoch) return;
+    checkInFlight = epoch;
     try {
       // Skip if user is subscribed — they have native VOD access
-      if (state.subscribed === null) state.subscribed = await isSubscribed(state.channel);
+      if (state.subscribed === null) {
+        const subscribed = await isSubscribed(channel);
+        if (epoch !== navEpoch) return;
+        state.subscribed = subscribed; // null (check failed) is retried on the next poll
+      }
       if (state.subscribed) return;
 
-      const vod = await fetchCurrentVod(state.channel);
+      const vod = await fetchCurrentVod(channel);
+      if (epoch !== navEpoch) return;
       if (vod) {
         const isNew = state.vodId !== vod.id;
         state.vodId = vod.id;
@@ -948,21 +1087,16 @@
         if (isNew) {
           // New recording (e.g. stream restarted) — drop preloaded state for the old VOD
           log('VOD found:', vod.id);
-          if (state.isRewinding) goLive();
+          if (state.isRewinding || state.loadingRewind) goLive();
           state.vodUrl = null;
           state.hlsReady = false;
           if (state.hlsInstance) { state.hlsInstance.destroy(); state.hlsInstance = null; }
         }
-        // Don't rebuild controls that are already on screen — re-injecting
-        // every 30s breaks an active drag and leaks listeners
-        if (!document.getElementById('tr-seekbar-area')) {
-          injectControls();
-          watchForReinject();
-        }
+        startUi(); // idempotent: never rebuilds controls that are already mounted
         preloadVod();
       } else {
-        // Ride out transient GQL hiccups: only tear down after two
-        // consecutive misses, and never mid-rewind
+        // Stream really ended (errors throw instead of landing here): tear
+        // down after two consecutive misses, and never mid-rewind
         state.vodMisses++;
         if (state.vodMisses >= 2 && !state.isRewinding) {
           state.vodId = null;
@@ -971,7 +1105,7 @@
         }
       }
     } catch (e) { log('VOD check error:', e); }
-    finally { checkInFlight = false; }
+    finally { if (checkInFlight === epoch) checkInFlight = null; }
   }
 
   function waitForPlayer() {
@@ -987,9 +1121,13 @@
 
   // ─── Cleanup ───────────────────────────────────────────────────────────────
 
+  // Always paired with a navEpoch bump, so in-flight async work bails out
+  // instead of resurrecting what this tears down
   function cleanup() {
     state.isRewinding = false;
     state.pendingSeek = null;
+    state.preloading = false;
+    state.loadingRewind = false;
     state.vodMisses = 0;
     state.subscribed = null;
     if (state.hlsInstance) { state.hlsInstance.destroy(); state.hlsInstance = null; }
@@ -997,9 +1135,9 @@
     // Pause BEFORE removing — a detached <video> keeps playing audio
     if (state.vodVideo) { state.vodVideo.pause(); state.vodVideo.remove(); state.vodVideo = null; }
     unmuteNative();
+    restorePlayPauseIcon();
     clearInterval(state.vodCheckInterval);
     state.vodCheckInterval = null;
-    reinjectObserver?.disconnect();
     removeControls();
     state.channel = null;
     state.vodId = null;
@@ -1020,6 +1158,7 @@
   function onNavigate() {
     clearTimeout(navTimer);
     navTimer = setTimeout(() => {
+      if (!state.enabled) return; // disabled from the popup: stay off across navigation
       const ch = channelFromUrl();
       if (ch !== state.channel) onChannelChange(ch);
     }, 500);
@@ -1029,9 +1168,15 @@
 
   window.addEventListener('message', (e) => {
     if (e.source !== window || e.data?.type !== 'TWITCH_REWIND_TOGGLE') return;
-    state.enabled = e.data.enabled;
-    if (!state.enabled) cleanup();
-    else onNavigate();
+    const enabled = e.data.enabled !== false;
+    if (enabled === state.enabled) return;
+    state.enabled = enabled;
+    if (!enabled) {
+      navEpoch++; // abandon in-flight channel setup and VOD checks
+      cleanup();
+    } else {
+      onNavigate();
+    }
   });
 
   // ─── Keyboard shortcuts (capture phase, when rewinding) ──────────────────
@@ -1045,7 +1190,7 @@
 
     const vod = state.vodVideo;
 
-    if (e.key === ' ' || e.key.toLowerCase() === 'k') {
+    if (e.key === ' ' || (e.key || '').toLowerCase() === 'k') {
       vod.paused ? vod.play().catch(() => {}) : vod.pause();
     } else if (e.key === 'ArrowLeft') {
       vod.currentTime = Math.max(0, vod.currentTime - SEEK_STEP);

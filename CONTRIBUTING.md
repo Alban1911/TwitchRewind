@@ -35,7 +35,7 @@ The file you'll touch most is **`src/inject.js`** — all rewind logic, UI injec
 2. **Channel detection** — `inject.js` parses the URL for the channel and hooks `history.pushState`/`replaceState` to track SPA navigation.
 3. **Subscription check** — On a live channel, the extension checks via Twitch's GQL API whether you're subscribed; if so, it skips entirely (you already have native VOD access).
 4. **VOD pre-loading** — Otherwise it finds the currently recording VOD, fetches a playback token, and pre-loads the HLS manifest silently so the first rewind is nearly instant.
-5. **Controls injection** — A seekbar and LIVE button are injected into Twitch's native player controls. A MutationObserver re-injects them when React re-renders the controls.
+5. **Controls injection** — A seekbar and LIVE button are injected into Twitch's native player controls. Twitch re-renders or replaces the control bar at will (mature-content gate, ads, reconnects), so a watchdog — a 500 ms tick plus a MutationObserver re-bound to the current player container — re-injects them whenever they go missing. Transient Twitch API errors never count as "stream ended", so they can't make the controls disappear.
 6. **Rewind** — Dragging the seekbar backward shows a second video (the VOD) on top of the native one, mutes the native player (event-driven), and syncs volume and quality from Twitch's native controls.
 7. **Return to live** — LIVE pauses and hides the VOD video (HLS stays warm for instant re-rewind), unmutes the native player, and resumes live playback.
 

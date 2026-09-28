@@ -129,8 +129,10 @@
       var url = (input instanceof Request) ? input.url : String(input);
 
       return _origFetch.apply(self, arguments).then(function (response) {
-        // Replace unmuted with muted for DMCA segments
-        if (url.indexOf('cloudfront') !== -1 && url.indexOf('.m3u8') !== -1) {
+        // Replace unmuted with muted for DMCA segments. Only rewrite successful
+        // playlists: new Response() throws on statuses like 0/204, which would
+        // turn a harmless error into a rejected fetch inside Twitch's player
+        if (response.ok && url.indexOf('cloudfront') !== -1 && url.indexOf('.m3u8') !== -1) {
           return response.text().then(function (body) {
             return new Response(body.replace(/-unmuted/g, '-muted'), {
               status: response.status,
@@ -181,7 +183,7 @@
   var oldWorker = window.Worker;
 
   window.Worker = class Worker extends oldWorker {
-    constructor(twitchBlobUrl) {
+    constructor(twitchBlobUrl, options) {
       // If anything in the patch fails, fall back to the untouched worker —
       // a broken patch must never take down Twitch's own player
       var patchedUrl = null;
@@ -197,7 +199,9 @@
       } catch (e) {
         log('Worker patch failed, loading unpatched worker:', e);
       }
-      super(patchedUrl || twitchBlobUrl);
+      // Forward options (type, name, credentials) — dropping them would turn a
+      // module worker into a classic one and break it
+      super(patchedUrl || twitchBlobUrl, options);
     }
   };
 
