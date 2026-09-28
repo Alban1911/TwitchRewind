@@ -9,6 +9,10 @@
   A lightweight extension for Chrome/Chromium and Firefox that adds a seekbar to live streams and plays subscriber-only VODs — no subscription needed.
 </p>
 
+<p align="center">
+  <img src="docs/screenshot-rewind.jpg" width="700" alt="Rewinding a live stream: hovering the seekbar shows a preview of that moment, and LIVE jumps back to the live edge">
+</p>
+
 ## Installation
 
 > Not on any store yet — install it manually:
