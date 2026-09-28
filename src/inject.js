@@ -61,8 +61,8 @@
     const m = Math.floor((sec % 3600) / 60);
     const s = sec % 60;
     const pad = (n) => String(n).padStart(2, '0');
-    // Hours on two digits, like Twitch's own seekbar: 01:59:11
-    return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+    // Always hh:mm:ss, like Twitch's own seekbar: 00:11:59, 01:59:11
+    return `${pad(h)}:${pad(m)}:${pad(s)}`;
   }
 
   function elapsed() {
