@@ -1729,6 +1729,13 @@
           state.vodId = null;
           state.vodCreatedAt = null;
           removeControls();
+          // Free what was kept for this recording: the VOD player kept warm
+          // for the next rewind (its buffer) and the preview frames
+          if (state.loadingRewind) goLive(); // cancels a rewind load in flight
+          state.vodUrl = null;
+          state.hlsReady = false;
+          if (state.hlsInstance) { state.hlsInstance.destroy(); state.hlsInstance = null; }
+          resetPreview();
         }
       }
     } catch (e) { log('VOD check error:', e); }
