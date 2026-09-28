@@ -175,10 +175,38 @@
   pointer-events: none;
   display: none;
   user-select: none;
+  text-align: center;
 }
 
 .tr-seekbar:hover .tr-seekbar-tooltip {
   display: block;
+}
+
+/* Preview frame above the time (only when the VOD has a low rendition).
+   Two classes: Twitch's `.video-player canvas` rule (absolute, 100% size)
+   would otherwise squash it into the tooltip */
+.tr-seekbar-tooltip .tr-seekbar-preview {
+  display: none;
+  position: static;
+  width: 160px;
+  height: 90px;
+  margin-bottom: 3px;
+  border-radius: 2px;
+  background: #000;
+  transition: opacity 0.15s ease;
+}
+
+.tr-seekbar-tooltip--preview {
+  padding: 3px 3px 2px;
+}
+
+.tr-seekbar-tooltip--preview .tr-seekbar-preview {
+  display: block;
+}
+
+/* Segment still loading: keep the previous frame, dimmed */
+.tr-seekbar-tooltip--loading .tr-seekbar-preview {
+  opacity: 0.35;
 }
 
 /* --- Red live dot (end of seekbar row) --- */

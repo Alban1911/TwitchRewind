@@ -36,8 +36,9 @@ The file you'll touch most is **`src/inject.js`** — all rewind logic, UI injec
 3. **Subscription check** — On a live channel, the extension checks via Twitch's GQL API whether you're subscribed; if so, it skips entirely (you already have native VOD access).
 4. **VOD pre-loading** — Otherwise it finds the currently recording VOD, fetches a playback token, and pre-loads the HLS manifest silently so the first rewind is nearly instant.
 5. **Controls injection** — A seekbar and LIVE button are injected into Twitch's native player controls. Twitch re-renders or replaces the control bar at will (mature-content gate, ads, reconnects), so a watchdog — a 500 ms tick plus a MutationObserver re-bound to the current player container — re-injects them whenever they go missing. Transient Twitch API errors never count as "stream ended", so they can't make the controls disappear.
-6. **Rewind** — Dragging the seekbar backward shows a second video (the VOD) on top of the native one, mutes the native player (event-driven), and syncs volume and quality from Twitch's native controls.
-7. **Return to live** — LIVE pauses and hides the VOD video (HLS stays warm for instant re-rewind), unmutes the native player, and resumes live playback.
+6. **Seekbar previews** — Twitch only publishes storyboards once a stream has ended, so hovering the seekbar drives a second, detached and muted hls.js player on the VOD's lowest rendition (160p, ~300 KB per 10 s segment). It fetches a segment only once the pointer rests (200 ms), draws the frame into the tooltip, caches one frame per segment, and stops loading after a few idle seconds. Channels without a rendition at 360p or below get the time only.
+7. **Rewind** — Dragging the seekbar backward shows a second video (the VOD) on top of the native one, mutes the native player (event-driven), and syncs volume and quality from Twitch's native controls.
+8. **Return to live** — LIVE pauses and hides the VOD video (HLS stays warm for instant re-rewind), unmutes the native player, and resumes live playback.
 
 State flow: the popup and the content script read and write `chrome.storage.local` directly, and the content script
 reacts to `chrome.storage.onChanged`, so no background page is needed. If one ever is, declare both

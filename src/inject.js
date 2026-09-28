@@ -186,6 +186,34 @@
     return findDirectVodUrl(vodId);
   }
 
+  // Lowest rendition of a VOD (usually 160p) for seekbar previews, or null when
+  // there's nothing at 360p or below: channels without transcodes only offer
+  // source quality, far too heavy to fetch on hover
+  async function resolvePreviewUrl(vodUrl) {
+    if (vodUrl.includes('usher.ttvnw.net')) {
+      const res = await fetchWithTimeout(vodUrl);
+      if (!res.ok) return null;
+      const lines = (await res.text()).split('\n');
+      let best = null;
+      lines.forEach((line, i) => {
+        const m = line.match(/^#EXT-X-STREAM-INF:.*RESOLUTION=\d+x(\d+)/);
+        const uri = (lines[i + 1] || '').trim();
+        if (m && uri && !uri.startsWith('#') && (!best || +m[1] < best.height)) best = { height: +m[1], uri };
+      });
+      return best && best.height <= 360 ? new URL(best.uri, vodUrl).href : null;
+    }
+    // Direct CDN playlist (sub-only VODs): .../<quality>/index-dvr.m3u8
+    const QUALITY_PATH = /\/[^/]+\/index-dvr\.m3u8$/;
+    if (!QUALITY_PATH.test(vodUrl)) return null;
+    for (const q of ['160p30', '360p30']) {
+      const url = vodUrl.replace(QUALITY_PATH, `/${q}/index-dvr.m3u8`);
+      try {
+        if ((await fetchWithTimeout(url, { method: 'HEAD' })).ok) return url;
+      } catch (_) {}
+    }
+    return null;
+  }
+
   // ─── DOM helpers ────────────────────────────────────────────────────────────
 
   function playerContainer() {
@@ -407,9 +435,156 @@
     if (pct === null) return;
     if (seekDragging) dragSeek(clampSeekSeconds(pct));
     if (seekDragging || sb.el.matches(':hover')) {
-      sb.tooltip.textContent = formatTime(pct * elapsed());
-      sb.tooltip.style.left = (pct * 100) + '%';
+      sb.time.textContent = formatTime(pct * elapsed());
+      showPreview(clampSeekSeconds(pct));
+      // Keep the tooltip (160px wide with a preview) inside the bar
+      const width = sb.el.clientWidth;
+      const half = sb.tooltip.offsetWidth / 2;
+      sb.tooltip.style.left = Math.min(Math.max(pct * width, half), Math.max(half, width - half)) + 'px';
     }
+  }
+
+  // ─── Seekbar previews (frame under the pointer while hovering) ───────────
+  // Twitch only publishes storyboards once a stream has ended, so previews come
+  // from a second, muted hls.js player on the VOD's lowest rendition (160p:
+  // ~300-360 KB per 10 s segment). It fetches a segment only once the pointer
+  // rests on the bar, stops loading shortly after, and keeps one frame per
+  // segment so revisited spots show instantly.
+
+  const PREVIEW_W = 160;
+  const PREVIEW_H = 90;
+  const PREVIEW_BUCKET = 10;       // seconds per cached frame (Twitch VOD segment length)
+  const PREVIEW_DEBOUNCE = 200;    // ms the pointer must rest before a segment is fetched
+  const PREVIEW_IDLE_STOP = 4000;  // ms without requests before the player stops loading
+  const PREVIEW_CACHE_MAX = 150;
+  const PREVIEW_RETRY = 60000;     // ms before trying again after a failure
+
+  const preview = {
+    gen: 0,            // bumped by resetPreview so stale async work bails out
+    url: null,         // low-rendition playlist of the current VOD
+    retryAt: 0,        // previews are off until then (no low rendition, error)
+    resolving: false,
+    hls: null,
+    video: null,       // detached and muted, never played: only seeked
+    parsed: false,     // playlist loaded, seeks can be served
+    loading: false,    // fetching segments (stopped when idle)
+    cache: new Map(),  // bucket -> canvas holding that segment's frame
+    wantBucket: null,  // bucket under the pointer
+    wantTime: 0,
+    debounce: 0,
+    idle: 0,
+  };
+
+  // Channel change, disable or new recording: drop the player and the frames
+  function resetPreview() {
+    preview.gen++;
+    clearTimeout(preview.debounce);
+    clearTimeout(preview.idle);
+    preview.hls?.destroy();
+    Object.assign(preview, {
+      url: null, retryAt: 0, resolving: false, hls: null, video: null,
+      parsed: false, loading: false, wantBucket: null,
+    });
+    preview.cache.clear();
+  }
+
+  function previewsAvailable() {
+    return !!state.vodUrl && Date.now() >= preview.retryAt && typeof Hls !== 'undefined' && Hls.isSupported();
+  }
+
+  // Pointer over the seekbar at `sec`: show the cached frame for that spot
+  // right away, and fetch a new one once the pointer rests there
+  function showPreview(sec) {
+    const sb = state.ui.seekbar;
+    clearTimeout(preview.debounce);
+    const on = previewsAvailable();
+    sb.tooltip.classList.toggle('tr-seekbar-tooltip--preview', on);
+    if (!on) return;
+    const bucket = Math.floor(sec / PREVIEW_BUCKET);
+    preview.wantBucket = bucket;
+    preview.wantTime = sec;
+    const frame = preview.cache.get(bucket);
+    if (frame) {
+      drawPreview(frame);
+    } else {
+      sb.tooltip.classList.add('tr-seekbar-tooltip--loading');
+      preview.debounce = setTimeout(fetchPreviewFrame, PREVIEW_DEBOUNCE);
+    }
+  }
+
+  function drawPreview(frame) {
+    const sb = state.ui.seekbar;
+    if (!sb) return;
+    sb.preview.getContext('2d').drawImage(frame, 0, 0, PREVIEW_W, PREVIEW_H);
+    sb.tooltip.classList.remove('tr-seekbar-tooltip--loading');
+  }
+
+  async function fetchPreviewFrame() {
+    if (!previewsAvailable()) return;
+    if (!preview.url) {
+      if (preview.resolving) return;
+      const gen = preview.gen;
+      preview.resolving = true;
+      const url = await resolvePreviewUrl(state.vodUrl).catch(() => null);
+      if (gen !== preview.gen) return;
+      preview.resolving = false;
+      if (!url) {
+        log('Seekbar previews unavailable for this VOD');
+        preview.retryAt = Date.now() + PREVIEW_RETRY;
+        return;
+      }
+      preview.url = url;
+    }
+    if (!preview.hls) { createPreviewPlayer(); return; } // MANIFEST_PARSED calls back
+    if (!preview.parsed) return;
+    const { hls, video } = preview;
+    if (!preview.loading) { hls.startLoad(preview.wantTime); preview.loading = true; }
+    video.currentTime = preview.wantTime; // 'seeked' then captures the frame
+    clearTimeout(preview.idle);
+    preview.idle = setTimeout(() => {
+      if (preview.hls !== hls) return;
+      hls.stopLoad(); // also stops refreshing the growing playlist
+      preview.loading = false;
+    }, PREVIEW_IDLE_STOP);
+  }
+
+  function createPreviewPlayer() {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    const hls = new Hls({ autoStartLoad: false, maxBufferLength: 1, maxMaxBufferLength: 2, backBufferLength: 0 });
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      if (preview.hls !== hls) return;
+      preview.parsed = true;
+      fetchPreviewFrame();
+    });
+    hls.on(Hls.Events.ERROR, (_e, data) => {
+      if (!data.fatal || preview.hls !== hls) return;
+      log(`Seekbar preview error (${data.details}), retrying later`);
+      hls.destroy();
+      Object.assign(preview, {
+        hls: null, video: null, url: null, parsed: false, loading: false,
+        retryAt: Date.now() + PREVIEW_RETRY,
+      });
+    });
+    // A paused video that finished seeking holds the frame at currentTime
+    video.addEventListener('seeked', capturePreviewFrame);
+    hls.loadSource(preview.url);
+    hls.attachMedia(video);
+    Object.assign(preview, { hls, video, parsed: false, loading: false });
+  }
+
+  function capturePreviewFrame(e) {
+    const video = e.target;
+    if (video !== preview.video || video.readyState < 2) return; // stale player, or no frame yet
+    const bucket = Math.floor(video.currentTime / PREVIEW_BUCKET);
+    const canvas = document.createElement('canvas');
+    canvas.width = PREVIEW_W;
+    canvas.height = PREVIEW_H;
+    canvas.getContext('2d').drawImage(video, 0, 0, PREVIEW_W, PREVIEW_H);
+    preview.cache.set(bucket, canvas);
+    if (preview.cache.size > PREVIEW_CACHE_MAX) preview.cache.delete(preview.cache.keys().next().value);
+    if (bucket === preview.wantBucket) drawPreview(canvas);
   }
 
   function onDocMouseUp() {
@@ -486,8 +661,16 @@
     seekThumb.className = 'tr-seekbar-thumb';
     seekThumb.style.left = '100%';
 
+    // Hover tooltip: preview frame (when available) above the time
     const seekTooltip = document.createElement('span');
     seekTooltip.className = 'tr-seekbar-tooltip';
+    const seekPreview = document.createElement('canvas');
+    seekPreview.className = 'tr-seekbar-preview';
+    seekPreview.width = PREVIEW_W;
+    seekPreview.height = PREVIEW_H;
+    const seekTime = document.createElement('span');
+    seekTime.className = 'tr-seekbar-time';
+    seekTooltip.append(seekPreview, seekTime);
 
     seekTrack.appendChild(seekPlayed);
     seekbar.append(seekTrack, seekThumb, seekTooltip);
@@ -529,7 +712,7 @@
     });
 
     state.ui.seekArea = seekArea;
-    state.ui.seekbar = { el: seekbar, played: seekPlayed, thumb: seekThumb, tooltip: seekTooltip };
+    state.ui.seekbar = { el: seekbar, played: seekPlayed, thumb: seekThumb, tooltip: seekTooltip, preview: seekPreview, time: seekTime };
     state.ui.curLabel = curLabel;
     state.ui.liveLabel = liveLabel;
 
@@ -1092,6 +1275,7 @@
           state.vodUrl = null;
           state.hlsReady = false;
           if (state.hlsInstance) { state.hlsInstance.destroy(); state.hlsInstance = null; }
+          resetPreview();
         }
         startUi(); // idempotent: never rebuilds controls that are already mounted
         preloadVod();
@@ -1133,6 +1317,7 @@
     state.subscribed = null;
     if (state.hlsInstance) { state.hlsInstance.destroy(); state.hlsInstance = null; }
     state.hlsReady = false;
+    resetPreview();
     // Pause BEFORE removing — a detached <video> keeps playing audio
     if (state.vodVideo) { state.vodVideo.pause(); state.vodVideo.remove(); state.vodVideo = null; }
     unmuteNative();
