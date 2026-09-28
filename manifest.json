@@ -6,12 +6,18 @@
   "browser_specific_settings": {
     "gecko": {
       "id": "twitch-rewind@alban1911.github.io",
-      "strict_min_version": "127.0"
+      "strict_min_version": "128.0"
     }
   },
   "permissions": ["storage"],
   "host_permissions": ["*://*.twitch.tv/*"],
   "content_scripts": [
+    {
+      "matches": ["*://*.twitch.tv/*"],
+      "js": ["src/vod-unlock.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
     {
       "matches": ["*://*.twitch.tv/*"],
       "js": ["src/content.js"],
@@ -29,7 +35,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["src/inject.js", "src/vod-unlock.js", "lib/hls.min.js"],
+      "resources": ["src/inject.js", "lib/hls.min.js"],
       "matches": ["*://*.twitch.tv/*"]
     }
   ],

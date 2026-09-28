@@ -23,7 +23,7 @@ Download the repository: **Code → Download ZIP** on [GitHub](https://github.co
 
 ### Firefox
 
-Requires Firefox 127 or later. Firefox only keeps signed add-ons installed, and Twitch Rewind isn't signed yet, so load it as a temporary add-on:
+Requires Firefox 128 or later. Firefox only keeps signed add-ons installed, and Twitch Rewind isn't signed yet, so load it as a temporary add-on:
 
 1. Open `about:debugging#/runtime/this-firefox`
 2. Click **Load Temporary Add-on…** and select the `manifest.json` file in the `TwitchRewind` folder

@@ -1,7 +1,9 @@
 // Twitch Rewind — Sub-only VOD Unlock
 // Patches the Worker constructor to intercept fetch inside Twitch's Amazon IVS worker.
 // When a usher VOD request returns 403 (sub-only), constructs a synthetic m3u8
-// from direct CDN URLs. Injected into MAIN world via <script> tag at document_start.
+// from direct CDN URLs. Declared as a MAIN-world content script at document_start, so
+// the browser runs it before any page script — the Worker must be patched before
+// Twitch creates its player worker.
 
 (function () {
   'use strict';

@@ -31,7 +31,7 @@ The file you'll touch most is **`src/inject.js`** — all rewind logic, UI injec
 
 ## How it works
 
-1. **VOD unlock** — At `document_start`, `vod-unlock.js` patches the `Worker` constructor to intercept `self.fetch` inside Twitch's Amazon IVS worker. When a Usher VOD request returns 403 (subscriber-only), it builds a synthetic m3u8 playlist from direct CDN URLs, making sub-only VODs play natively.
+1. **VOD unlock** — `vod-unlock.js` is a MAIN-world content script, so the browser runs it at `document_start` before any Twitch script. It patches the `Worker` constructor to intercept `self.fetch` inside Twitch's Amazon IVS worker. When a Usher VOD request returns 403 (subscriber-only), it builds a synthetic m3u8 playlist from direct CDN URLs, making sub-only VODs play natively.
 2. **Channel detection** — `inject.js` parses the URL for the channel and hooks `history.pushState`/`replaceState` to track SPA navigation.
 3. **Subscription check** — On a live channel, the extension checks via Twitch's GQL API whether you're subscribed; if so, it skips entirely (you already have native VOD access).
 4. **VOD pre-loading** — Otherwise it finds the currently recording VOD, fetches a playback token, and pre-loads the HLS manifest silently so the first rewind is nearly instant.

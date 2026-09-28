@@ -1,9 +1,10 @@
 // Twitch Rewind — Content Script
-// Runs at document_start. Injects vod-unlock.js immediately (before Twitch scripts),
-// then injects hls.js + inject.js after DOM is ready. The enable/disable state lives
-// in chrome.storage, so no background page is required — the page script is kept in
-// sync through chrome.storage.onChanged. This keeps a single manifest for both
-// Chrome and Firefox (no background.service_worker conflict).
+// Injects hls.js + inject.js into the page after DOM is ready. (vod-unlock.js is not
+// injected here: it's a MAIN-world content script in the manifest, so the browser runs
+// it before any Twitch script — a <script> tag added from here loads asynchronously and
+// can lose the race against Twitch creating its player worker.) The enable/disable
+// state lives in chrome.storage, so no background page is required — the page script
+// is kept in sync through chrome.storage.onChanged.
 
 (function () {
   'use strict';
@@ -29,9 +30,6 @@
       );
     });
   }
-
-  // Inject VOD unlock ASAP (before Twitch creates its player worker)
-  injectScript('src/vod-unlock.js');
 
   // Inject rewind scripts after DOM is ready, then push the initial state
   async function initRewind() {
