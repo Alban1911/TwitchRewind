@@ -15,7 +15,7 @@
 
 ## Features
 
-- **The same seekbar as Twitch's own rewind** — Twitch keeps its rewind for subscribers and Turbo users; this brings the same bar to any live stream, down to the colors, thumb, time balloon and LIVE badge
+- **The same seekbar as Twitch's own rewind** — Twitch keeps its rewind for Turbo users and some subscribers, on Affiliate and Partner channels only; this brings the same bar to any live stream that saves its VODs, small channels included, down to the colors, thumb, time balloon and LIVE badge
 - **Previews Twitch doesn't have** — Twitch's bar only shows a time; hover this one to see the frame at that moment (one every 2 seconds), and click to rewind to exactly that frame
 - **Sub-only VODs** — watch subscriber-only VODs without subscribing
 
@@ -63,7 +63,7 @@ Volume, quality, and play/pause keep working through Twitch's native controls th
 - The streamer must have VOD saving enabled — otherwise there's nothing to rewind
 - You can seek up to ~15 seconds behind the live edge (recent VOD segments take a moment to become available)
 - Seekbar previews download a single frame for the spot you hover (streams have one every 2 seconds) — tens of KB, or a few hundred KB on channels without transcodes — and are cached
-- Where Twitch offers its own rewind (channels you're subscribed to, or everywhere with Turbo), the extension stays out of the way and leaves you Twitch's seekbar
+- Where Twitch shows you its own rewind (on Affiliate and Partner channels, with Turbo, or as a subscriber when the channel gives subscribers ad-free viewing), the extension steps aside and leaves you Twitch's seekbar
 - No tracking, no analytics
 
 ## Credits

@@ -33,7 +33,6 @@
     loadingRewind: false,  // rewind HLS setup in flight
     pendingSeek: null,     // seek requested while a load is in flight
     rewindSeq: 0,          // bumped by goLive so an in-flight rewind load knows it was cancelled
-    subscribed: null,      // cached subscription check for the current channel
     vodMisses: 0,          // consecutive VOD checks that found no recording
   };
 
@@ -83,18 +82,6 @@
 
   function gqlError(data, what) {
     return new Error(`${what} failed${data?.errors?.length ? `: ${data.errors[0].message}` : ''}`);
-  }
-
-  // true/false, or null when the check itself failed (retried on the next poll)
-  async function isSubscribed(login) {
-    try {
-      const data = await gql({
-        query: `query($login:String!){user(login:$login){self{subscriptionBenefit{id}}}}`,
-        variables: { login },
-      });
-      if (!data?.data?.user && data?.errors?.length) return null;
-      return !!data?.data?.user?.self?.subscriptionBenefit?.id;
-    } catch (_) { return null; }
   }
 
   // The VOD currently being recorded (= current live stream), or null when there
@@ -224,6 +211,14 @@
       document.querySelector('[data-a-target="player-controls"]') ||
       document.querySelector('.player-controls')
     );
+  }
+
+  // Twitch's own rewind puts its seekbar in the control bar. It only exists on
+  // Affiliate and Partner channels that save and publish their VODs, for Turbo
+  // users — and for subscribers when the channel gives them ad-free viewing —
+  // so it's checked on the page, not guessed from the viewer's subscription
+  function nativeRewind() {
+    return !!nativeControls()?.querySelector('[data-a-target="player-seekbar"]');
   }
 
   // ─── Quality switching (intercept Twitch's native quality menu) ─────────
@@ -1214,13 +1209,12 @@
       uiObservedContainer = container;
     }
 
-    const controls = nativeControls();
-    // Twitch's own rewind (subscribers, Turbo) puts its seekbar in this
-    // control bar: step aside rather than stack a second one on top
-    if (controls?.querySelector('[data-a-target="player-seekbar"]')) {
+    // Twitch's own rewind is here: step aside rather than stack a second seekbar
+    if (nativeRewind()) {
       if (state.ui.seekArea) stepAside();
       return;
     }
+    const controls = nativeControls();
     const area = state.ui.seekArea;
     if (controls && !(area?.isConnected && controls.contains(area))) injectControls(controls);
 
@@ -1693,16 +1687,10 @@
     const epoch = navEpoch;
     const channel = state.channel;
     if (!channel || !state.enabled || checkInFlight === epoch) return;
+    // Twitch's own rewind is on this channel: nothing to prepare (see stepAside)
+    if (nativeRewind()) return;
     checkInFlight = epoch;
     try {
-      // Skip if user is subscribed — they have native VOD access
-      if (state.subscribed === null) {
-        const subscribed = await isSubscribed(channel);
-        if (epoch !== navEpoch) return;
-        state.subscribed = subscribed; // null (check failed) is retried on the next poll
-      }
-      if (state.subscribed) return;
-
       const vod = await fetchCurrentVod(channel);
       if (epoch !== navEpoch) return;
       if (vod) {
@@ -1763,7 +1751,6 @@
     state.preloading = false;
     state.loadingRewind = false;
     state.vodMisses = 0;
-    state.subscribed = null;
     if (state.hlsInstance) { state.hlsInstance.destroy(); state.hlsInstance = null; }
     state.hlsReady = false;
     resetPreview();
