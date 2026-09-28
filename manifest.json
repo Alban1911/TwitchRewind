@@ -3,6 +3,12 @@
   "name": "Twitch Rewind",
   "version": "1.0.0",
   "description": "Rewind any Twitch live stream and unlock subscriber-only VODs",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "twitch-rewind@alban1911.github.io",
+      "strict_min_version": "127.0"
+    }
+  },
   "permissions": ["storage"],
   "host_permissions": ["*://*.twitch.tv/*"],
   "content_scripts": [
@@ -13,9 +19,6 @@
       "run_at": "document_start"
     }
   ],
-  "background": {
-    "service_worker": "src/background.js"
-  },
   "action": {
     "default_popup": "src/popup.html",
     "default_icon": {
