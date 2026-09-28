@@ -52,7 +52,7 @@ Volume, quality, and play/pause keep working through Twitch's native controls th
 
 - The streamer must have VOD saving enabled — otherwise there's nothing to rewind
 - You can seek up to ~15 seconds behind the live edge (recent VOD segments take a moment to become available)
-- Seekbar previews download only the first frame of the 10-second segment you hover — a few KB, or a few hundred KB on channels without transcodes — and are cached
+- Seekbar previews download a single frame for the spot you hover (streams have one every 2 seconds) — tens of KB, or a few hundred KB on channels without transcodes — and are cached
 - On channels you're subscribed to, the extension stays out of the way — you already have native VOD access
 - No tracking, no analytics
 
