@@ -182,7 +182,7 @@
   display: block;
 }
 
-/* Preview frame above the time (only when the VOD has a low rendition).
+/* Preview frame above the time (when the browser has WebCodecs).
    Two classes: Twitch's `.video-player canvas` rule (absolute, 100% size)
    would otherwise squash it into the tooltip */
 .tr-seekbar-tooltip .tr-seekbar-preview {

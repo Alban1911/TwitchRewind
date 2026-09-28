@@ -186,34 +186,6 @@
     return findDirectVodUrl(vodId);
   }
 
-  // Lowest rendition of a VOD (usually 160p) for seekbar previews, or null when
-  // there's nothing at 360p or below: channels without transcodes only offer
-  // source quality, far too heavy to fetch on hover
-  async function resolvePreviewUrl(vodUrl) {
-    if (vodUrl.includes('usher.ttvnw.net')) {
-      const res = await fetchWithTimeout(vodUrl);
-      if (!res.ok) return null;
-      const lines = (await res.text()).split('\n');
-      let best = null;
-      lines.forEach((line, i) => {
-        const m = line.match(/^#EXT-X-STREAM-INF:.*RESOLUTION=\d+x(\d+)/);
-        const uri = (lines[i + 1] || '').trim();
-        if (m && uri && !uri.startsWith('#') && (!best || +m[1] < best.height)) best = { height: +m[1], uri };
-      });
-      return best && best.height <= 360 ? new URL(best.uri, vodUrl).href : null;
-    }
-    // Direct CDN playlist (sub-only VODs): .../<quality>/index-dvr.m3u8
-    const QUALITY_PATH = /\/[^/]+\/index-dvr\.m3u8$/;
-    if (!QUALITY_PATH.test(vodUrl)) return null;
-    for (const q of ['160p30', '360p30']) {
-      const url = vodUrl.replace(QUALITY_PATH, `/${q}/index-dvr.m3u8`);
-      try {
-        if ((await fetchWithTimeout(url, { method: 'HEAD' })).ok) return url;
-      } catch (_) {}
-    }
-    return null;
-  }
-
   // ─── DOM helpers ────────────────────────────────────────────────────────────
 
   function playerContainer() {
@@ -403,6 +375,7 @@
   // ─── Seekbar drag (document-level so re-injection never leaks listeners) ───
 
   let seekDragging = false;
+  let dragTarget = null; // last position a drag seeked to (snapped positions repeat)
 
   // Pointer position as a fraction of the seekbar, or null when the bar isn't
   // laid out (hidden during an ad, or detached by a re-render) — a zero-width
@@ -419,6 +392,16 @@
     return Math.min(pct * total, Math.max(0, total - MIN_REWIND_SEC));
   }
 
+  // Seekbar position -> where playback should start. Once previews work for
+  // this VOD, that's the start of the segment whose first frame the tooltip
+  // shows: what you see is where you land (a pixel is already ~20 s on a
+  // multi-hour stream). Without previews, the exact position.
+  function seekTarget(pct) {
+    const sec = clampSeekSeconds(pct);
+    if (!preview.source || !preview.cache.size || !previewsAvailable()) return sec;
+    return preview.source.segments[segmentAt(sec)].start;
+  }
+
   // Seek while dragging: directly once the VOD is ready, otherwise queue it
   // for the MANIFEST_PARSED handler of the load in flight
   function dragSeek(sec) {
@@ -433,10 +416,15 @@
     if (!sb) return;
     const pct = seekPctFromEvent(sb.el, e);
     if (pct === null) return;
-    if (seekDragging) dragSeek(clampSeekSeconds(pct));
+    const target = seekTarget(pct);
+    if (seekDragging && target !== dragTarget) {
+      dragTarget = target;
+      dragSeek(target);
+    }
     if (seekDragging || sb.el.matches(':hover')) {
-      sb.time.textContent = formatTime(pct * elapsed());
-      showPreview(clampSeekSeconds(pct));
+      // Snapped: show where playback will start; exact: the hovered time
+      sb.time.textContent = formatTime(target !== clampSeekSeconds(pct) ? target : pct * elapsed());
+      showPreview(target);
       // Keep the tooltip (160px wide with a preview) inside the bar
       const width = sb.el.clientWidth;
       const half = sb.tooltip.offsetWidth / 2;
@@ -444,52 +432,53 @@
     }
   }
 
-  // ─── Seekbar previews (frame under the pointer while hovering) ───────────
-  // Twitch only publishes storyboards once a stream has ended, so previews come
-  // from a second, muted hls.js player on the VOD's lowest rendition (160p:
-  // ~300-360 KB per 10 s segment). It fetches a segment only once the pointer
-  // rests on the bar, stops loading shortly after, and keeps one frame per
-  // segment so revisited spots show instantly.
+  // ─── Seekbar previews (keyframe under the pointer while hovering) ────────
+  // Twitch only publishes storyboards once a stream has ended, so previews are
+  // made on the fly. Every VOD segment (~10 s) starts with a keyframe: we
+  // download just the head of the segment under the pointer (a few KB at
+  // 160p, a few hundred KB at source quality, instead of the whole segment),
+  // cut that first frame out of the MPEG-TS or fMP4 container and decode it
+  // with WebCodecs. One frame is cached per segment.
 
   const PREVIEW_W = 160;
   const PREVIEW_H = 90;
-  const PREVIEW_BUCKET = 10;       // seconds per cached frame (Twitch VOD segment length)
-  const PREVIEW_DEBOUNCE = 200;    // ms the pointer must rest before a segment is fetched
-  const PREVIEW_IDLE_STOP = 4000;  // ms without requests before the player stops loading
-  const PREVIEW_CACHE_MAX = 150;
-  const PREVIEW_RETRY = 60000;     // ms before trying again after a failure
+  const PREVIEW_DEBOUNCE = 100;          // ms the pointer must rest before fetching
+  const PREVIEW_CACHE_MAX = 200;
+  const PREVIEW_RETRY = 60000;           // ms before trying again after a failure
+  const PREVIEW_PLAYLIST_TTL = 15000;    // re-read the growing playlist at most this often
+  const PREVIEW_READ_STEPS = [64, 256, 1024, 4096].map((kb) => kb * 1024); // byte ranges read in turn
 
   const preview = {
     gen: 0,            // bumped by resetPreview so stale async work bails out
-    url: null,         // low-rendition playlist of the current VOD
-    retryAt: 0,        // previews are off until then (no low rendition, error)
-    resolving: false,
-    hls: null,
-    video: null,       // detached and muted, never played: only seeked
-    parsed: false,     // playlist loaded, seeks can be served
-    loading: false,    // fetching segments (stopped when idle)
-    cache: new Map(),  // bucket -> canvas holding that segment's frame
-    wantBucket: null,  // bucket under the pointer
-    wantTime: 0,
+    source: null,      // { segments: [{ start, url }], end, init, fetchedAt } of the preview rendition
+    retryAt: 0,        // previews are off until then (no usable rendition, error)
+    loading: false,    // a playlist or keyframe fetch is in flight
+    cache: new Map(),  // segment index -> canvas holding its first frame
+    wantTime: 0,       // position under the pointer (s)
     debounce: 0,
-    idle: 0,
   };
 
-  // Channel change, disable or new recording: drop the player and the frames
+  // Channel change, disable or new recording: forget the rendition and the frames
   function resetPreview() {
     preview.gen++;
     clearTimeout(preview.debounce);
-    clearTimeout(preview.idle);
-    preview.hls?.destroy();
-    Object.assign(preview, {
-      url: null, retryAt: 0, resolving: false, hls: null, video: null,
-      parsed: false, loading: false, wantBucket: null,
-    });
+    Object.assign(preview, { source: null, retryAt: 0, loading: false });
     preview.cache.clear();
   }
 
   function previewsAvailable() {
-    return !!state.vodUrl && Date.now() >= preview.retryAt && typeof Hls !== 'undefined' && Hls.isSupported();
+    return !!state.vodUrl && Date.now() >= preview.retryAt && typeof VideoDecoder === 'function';
+  }
+
+  // Index of the segment containing `sec` in the preview playlist
+  function segmentAt(sec) {
+    const segs = preview.source.segments;
+    let lo = 0, hi = segs.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (segs[mid].start <= sec) lo = mid; else hi = mid - 1;
+    }
+    return lo;
   }
 
   // Pointer over the seekbar at `sec`: show the cached frame for that spot
@@ -500,10 +489,8 @@
     const on = previewsAvailable();
     sb.tooltip.classList.toggle('tr-seekbar-tooltip--preview', on);
     if (!on) return;
-    const bucket = Math.floor(sec / PREVIEW_BUCKET);
-    preview.wantBucket = bucket;
     preview.wantTime = sec;
-    const frame = preview.cache.get(bucket);
+    const frame = preview.source && preview.cache.get(segmentAt(sec));
     if (frame) {
       drawPreview(frame);
     } else {
@@ -519,72 +506,286 @@
     sb.tooltip.classList.remove('tr-seekbar-tooltip--loading');
   }
 
+  // One fetch at a time; when it lands, chase wherever the pointer is now
   async function fetchPreviewFrame() {
-    if (!previewsAvailable()) return;
-    if (!preview.url) {
-      if (preview.resolving) return;
-      const gen = preview.gen;
-      preview.resolving = true;
-      const url = await resolvePreviewUrl(state.vodUrl).catch(() => null);
-      if (gen !== preview.gen) return;
-      preview.resolving = false;
-      if (!url) {
-        log('Seekbar previews unavailable for this VOD');
-        preview.retryAt = Date.now() + PREVIEW_RETRY;
-        return;
+    if (preview.loading || !previewsAvailable()) return;
+    const gen = preview.gen;
+    preview.loading = true;
+    try {
+      const sec = preview.wantTime;
+      const src = preview.source;
+      if (!src || (sec >= src.end && Date.now() - src.fetchedAt > PREVIEW_PLAYLIST_TTL)) {
+        const source = await loadPreviewSource(state.vodUrl);
+        if (gen !== preview.gen) return;
+        preview.source = source;
       }
-      preview.url = url;
+      const index = segmentAt(sec);
+      if (!preview.cache.has(index)) {
+        const frame = await grabKeyframe(preview.source.segments[index].url, preview.source.init);
+        if (gen !== preview.gen) return;
+        preview.cache.set(index, frame);
+        if (preview.cache.size > PREVIEW_CACHE_MAX) preview.cache.delete(preview.cache.keys().next().value);
+      }
+    } catch (e) {
+      if (gen !== preview.gen) return;
+      log('Seekbar previews unavailable for now:', e.message || e);
+      preview.retryAt = Date.now() + PREVIEW_RETRY;
+      return;
+    } finally {
+      if (gen === preview.gen) preview.loading = false;
     }
-    if (!preview.hls) { createPreviewPlayer(); return; } // MANIFEST_PARSED calls back
-    if (!preview.parsed) return;
-    const { hls, video } = preview;
-    if (!preview.loading) { hls.startLoad(preview.wantTime); preview.loading = true; }
-    video.currentTime = preview.wantTime; // 'seeked' then captures the frame
-    clearTimeout(preview.idle);
-    preview.idle = setTimeout(() => {
-      if (preview.hls !== hls) return;
-      hls.stopLoad(); // also stops refreshing the growing playlist
-      preview.loading = false;
-    }, PREVIEW_IDLE_STOP);
+    const frame = preview.cache.get(segmentAt(preview.wantTime));
+    if (frame) drawPreview(frame);
+    else fetchPreviewFrame();
   }
 
-  function createPreviewPlayer() {
-    const video = document.createElement('video');
-    video.muted = true;
-    video.playsInline = true;
-    const hls = new Hls({ autoStartLoad: false, maxBufferLength: 1, maxMaxBufferLength: 2, backBufferLength: 0 });
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      if (preview.hls !== hls) return;
-      preview.parsed = true;
-      fetchPreviewFrame();
-    });
-    hls.on(Hls.Events.ERROR, (_e, data) => {
-      if (!data.fatal || preview.hls !== hls) return;
-      log(`Seekbar preview error (${data.details}), retrying later`);
-      hls.destroy();
-      Object.assign(preview, {
-        hls: null, video: null, url: null, parsed: false, loading: false,
-        retryAt: Date.now() + PREVIEW_RETRY,
+  // Playlist of the rendition used for previews: the smallest H.264 one
+  // (its keyframes are a few KB), falling back to larger ones — even source
+  // quality is fine, since only the first frame of a segment is downloaded
+  async function loadPreviewSource(vodUrl) {
+    for (const url of await previewPlaylistCandidates(vodUrl)) {
+      const res = await fetchWithTimeout(url);
+      if (!res.ok) continue;
+      const source = parseMediaPlaylist(await res.text(), url);
+      if (!source.segments.length) continue;
+      if (source.init) { // fMP4: codec and decoder config come from the init segment
+        const initRes = await fetchWithTimeout(source.init);
+        const init = initRes.ok && mp4Init(new Uint8Array(await initRes.arrayBuffer()));
+        if (!init || init.error) continue; // e.g. an HEVC rendition: try the next one
+        source.init = init;
+      }
+      source.fetchedAt = Date.now();
+      return source;
+    }
+    throw new Error('no usable rendition');
+  }
+
+  async function previewPlaylistCandidates(vodUrl) {
+    if (vodUrl.includes('usher.ttvnw.net')) {
+      const res = await fetchWithTimeout(vodUrl);
+      if (!res.ok) throw new Error(`master playlist HTTP ${res.status}`);
+      const lines = (await res.text()).split('\n');
+      const variants = [];
+      lines.forEach((line, i) => {
+        const res = line.startsWith('#EXT-X-STREAM-INF:') && line.match(/RESOLUTION=\d+x(\d+)/); // skips audio_only
+        const uri = (lines[i + 1] || '').trim();
+        if (res && uri && !uri.startsWith('#')) {
+          variants.push({ avc: /avc1/.test(line) ? 0 : 1, height: +res[1], url: new URL(uri, vodUrl).href });
+        }
       });
-    });
-    // A paused video that finished seeking holds the frame at currentTime
-    video.addEventListener('seeked', capturePreviewFrame);
-    hls.loadSource(preview.url);
-    hls.attachMedia(video);
-    Object.assign(preview, { hls, video, parsed: false, loading: false });
+      return variants.sort((a, b) => a.avc - b.avc || a.height - b.height).map((v) => v.url);
+    }
+    // Direct CDN playlist (sub-only VODs): .../<quality>/index-dvr.m3u8
+    const QUALITY_PATH = /\/[^/]+\/index-dvr\.m3u8$/;
+    if (!QUALITY_PATH.test(vodUrl)) return [vodUrl];
+    return [...VOD_QUALITIES].reverse().map((q) => vodUrl.replace(QUALITY_PATH, `/${q}/index-dvr.m3u8`));
   }
 
-  function capturePreviewFrame(e) {
-    const video = e.target;
-    if (video !== preview.video || video.readyState < 2) return; // stale player, or no frame yet
-    const bucket = Math.floor(video.currentTime / PREVIEW_BUCKET);
+  function parseMediaPlaylist(text, url) {
+    const segments = [];
+    let t = 0, duration = 0, init = null;
+    for (const raw of text.split('\n')) {
+      const line = raw.trim();
+      if (line.startsWith('#EXTINF:')) {
+        duration = parseFloat(line.slice(8));
+      } else if (line.startsWith('#EXT-X-MAP:')) {
+        const m = line.match(/URI="([^"]+)"/);
+        if (m) init = new URL(m[1], url).href;
+      } else if (line && !line.startsWith('#')) {
+        // DMCA-muted parts are listed as -unmuted but served as -muted (see vod-unlock.js)
+        segments.push({ start: t, url: new URL(line.replace(/-unmuted/g, '-muted'), url).href });
+        t += duration;
+      }
+    }
+    return { segments, end: t, init };
+  }
+
+  async function grabKeyframe(url, init) {
+    const keyframe = await readSegmentHead(url, init ? (buf) => mp4Keyframe(buf, init) : tsKeyframe);
+    return decodeKeyframe(keyframe);
+  }
+
+  // Reads the start of a segment in growing byte ranges until `parse` finds
+  // the first keyframe in it (parse returns null while it needs more bytes)
+  async function readSegmentHead(url, parse) {
+    let buf = new Uint8Array(0);
+    for (const end of PREVIEW_READ_STEPS) {
+      const res = await fetchWithTimeout(url, { headers: { Range: `bytes=${buf.length}-${end - 1}` } });
+      if (res.status !== 206 && res.status !== 200) throw new Error(`segment HTTP ${res.status}`);
+      if (res.status === 200) buf = new Uint8Array(0); // range ignored: this is the whole segment
+      const reader = res.body.getReader();
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (value) {
+          const grown = new Uint8Array(buf.length + value.length);
+          grown.set(buf);
+          grown.set(value, buf.length);
+          buf = grown;
+          const found = parse(buf);
+          if (found) {
+            reader.cancel().catch(() => {}); // don't download the rest
+            if (found.error) throw new Error(found.error);
+            return found;
+          }
+        }
+        if (done) break;
+      }
+      if (res.status === 200) break;
+    }
+    throw new Error('no keyframe at the start of the segment');
+  }
+
+  async function decodeKeyframe(keyframe) {
+    const config = { codec: keyframe.codec, optimizeForLatency: true };
+    if (keyframe.description) config.description = keyframe.description;
+    if (!(await VideoDecoder.isConfigSupported(config)).supported) throw new Error(`can't decode ${keyframe.codec}`);
     const canvas = document.createElement('canvas');
     canvas.width = PREVIEW_W;
     canvas.height = PREVIEW_H;
-    canvas.getContext('2d').drawImage(video, 0, 0, PREVIEW_W, PREVIEW_H);
-    preview.cache.set(bucket, canvas);
-    if (preview.cache.size > PREVIEW_CACHE_MAX) preview.cache.delete(preview.cache.keys().next().value);
-    if (bucket === preview.wantBucket) drawPreview(canvas);
+    let drawn = false;
+    let failure = null;
+    const decoder = new VideoDecoder({
+      output: (frame) => {
+        canvas.getContext('2d').drawImage(frame, 0, 0, PREVIEW_W, PREVIEW_H);
+        frame.close();
+        drawn = true;
+      },
+      error: (e) => { failure = e; },
+    });
+    try {
+      decoder.configure(config);
+      decoder.decode(new EncodedVideoChunk({ type: 'key', timestamp: 0, data: keyframe.data }));
+      await decoder.flush();
+    } catch (e) {
+      failure = failure || e;
+    } finally {
+      if (decoder.state !== 'closed') decoder.close();
+    }
+    if (!drawn) throw failure || new Error('no frame decoded');
+    return canvas;
+  }
+
+  // ── Keyframe extraction ──
+  // Parsers return null while they need more bytes, { error } when the
+  // segment can't be used, else { codec, description?, data } for WebCodecs.
+
+  const hexByte = (x) => x.toString(16).padStart(2, '0');
+  const readU32 = (b, p) => b[p] * 0x1000000 + (b[p + 1] << 16) + (b[p + 2] << 8) + b[p + 3];
+
+  // MPEG-TS: the first H.264 access unit (SPS + PPS + IDR, Annex B) is the
+  // payload of the video PID up to its next PES start
+  function tsKeyframe(b) {
+    let pmtPid = -1, videoPid = -1, pes = null, size = 0, complete = false;
+    for (let off = 0; off + 188 <= b.length; off += 188) {
+      if (b[off] !== 0x47) return { error: 'not an MPEG-TS segment' };
+      const unitStart = b[off + 1] & 0x40;
+      const pid = ((b[off + 1] & 0x1f) << 8) | b[off + 2];
+      const adaptation = (b[off + 3] >> 4) & 3;
+      if (!(adaptation & 1)) continue; // no payload
+      let p = off + 4 + (adaptation === 3 ? 1 + b[off + 4] : 0);
+      const end = off + 188;
+      if (p >= end) continue;
+      if (pid === 0 && unitStart && pmtPid < 0) { // PAT -> PMT pid
+        p += 1 + b[p];
+        const sectionEnd = p + 3 + (((b[p + 1] & 0x0f) << 8) | b[p + 2]) - 4;
+        for (let q = p + 8; q + 4 <= sectionEnd; q += 4) {
+          if (((b[q] << 8) | b[q + 1]) !== 0) { pmtPid = ((b[q + 2] & 0x1f) << 8) | b[q + 3]; break; }
+        }
+      } else if (pid === pmtPid && unitStart && videoPid < 0) { // PMT -> H.264 pid
+        p += 1 + b[p];
+        const sectionEnd = p + 3 + (((b[p + 1] & 0x0f) << 8) | b[p + 2]) - 4;
+        let q = p + 12 + (((b[p + 10] & 0x0f) << 8) | b[p + 11]);
+        while (q + 5 <= sectionEnd) {
+          if (b[q] === 0x1b) { videoPid = ((b[q + 1] & 0x1f) << 8) | b[q + 2]; break; }
+          q += 5 + (((b[q + 3] & 0x0f) << 8) | b[q + 4]);
+        }
+        if (videoPid < 0) return { error: 'no H.264 video in segment' };
+      } else if (pid === videoPid) {
+        if (unitStart) {
+          if (pes) { complete = true; break; }
+          pes = [];
+        }
+        if (pes) { pes.push(b.subarray(p, end)); size += end - p; }
+      }
+    }
+    if (!complete) return null;
+    const unit = new Uint8Array(size);
+    let o = 0;
+    for (const part of pes) { unit.set(part, o); o += part.length; }
+    const es = unit.subarray(9 + unit[8]); // skip the PES header
+    for (let i = 0; i + 6 < es.length; i++) { // SPS NAL: profile, constraints, level -> codec string
+      if (es[i] === 0 && es[i + 1] === 0 && es[i + 2] === 1 && (es[i + 3] & 0x1f) === 7) {
+        return { codec: `avc1.${hexByte(es[i + 4])}${hexByte(es[i + 5])}${hexByte(es[i + 6])}`, data: es.slice() };
+      }
+    }
+    return { error: 'no SPS in the first access unit' };
+  }
+
+  function mp4Boxes(b, start, end) {
+    const list = [];
+    for (let p = start; p + 8 <= end;) {
+      let size = readU32(b, p), header = 8;
+      const type = String.fromCharCode(b[p + 4], b[p + 5], b[p + 6], b[p + 7]);
+      if (size === 1) { size = readU32(b, p + 8) * 0x100000000 + readU32(b, p + 12); header = 16; } else if (size === 0) size = end - p;
+      if (size < header) break;
+      list.push({ type, start: p, body: p + header, end: p + size });
+      p += size;
+    }
+    return list;
+  }
+
+  const mp4Child = (b, box, type) => box && mp4Boxes(b, box.body, Math.min(box.end, b.length)).find((x) => x.type === type);
+
+  // fMP4 init segment: video track id + avcC decoder configuration
+  function mp4Init(b) {
+    const moov = mp4Boxes(b, 0, b.length).find((x) => x.type === 'moov');
+    if (!moov || moov.end > b.length) return { error: 'incomplete init segment' };
+    for (const trak of mp4Boxes(b, moov.body, moov.end).filter((x) => x.type === 'trak')) {
+      const mdia = mp4Child(b, trak, 'mdia');
+      const hdlr = mp4Child(b, mdia, 'hdlr');
+      if (!hdlr || String.fromCharCode(...b.subarray(hdlr.body + 8, hdlr.body + 12)) !== 'vide') continue;
+      const tkhd = mp4Child(b, trak, 'tkhd');
+      const stsd = mp4Child(b, mp4Child(b, mp4Child(b, mdia, 'minf'), 'stbl'), 'stsd');
+      const entry = stsd && mp4Boxes(b, stsd.body + 8, stsd.end)[0];
+      if (!tkhd || !entry || !/^avc[13]$/.test(entry.type)) return { error: `unsupported codec ${entry ? entry.type : '?'}` };
+      const avcC = mp4Boxes(b, entry.body + 78, entry.end).find((x) => x.type === 'avcC'); // after the 78-byte VisualSampleEntry
+      if (!avcC) return { error: 'no avcC' };
+      const description = b.slice(avcC.body, avcC.end);
+      return {
+        trackId: readU32(b, tkhd.body + (b[tkhd.body] === 1 ? 20 : 12)),
+        codec: `avc1.${hexByte(description[1])}${hexByte(description[2])}${hexByte(description[3])}`,
+        description,
+      };
+    }
+    return { error: 'no video track' };
+  }
+
+  // fMP4 media segment: first sample of the video track (moof/traf/trun)
+  function mp4Keyframe(b, init) {
+    const moof = mp4Boxes(b, 0, b.length).find((x) => x.type === 'moof');
+    if (!moof || moof.end > b.length) return null;
+    for (const traf of mp4Boxes(b, moof.body, moof.end).filter((x) => x.type === 'traf')) {
+      const tfhd = mp4Child(b, traf, 'tfhd');
+      if (!tfhd || readU32(b, tfhd.body + 4) !== init.trackId) continue;
+      const tfFlags = readU32(b, tfhd.body) & 0xffffff;
+      let q = tfhd.body + 8, base = moof.start;
+      if (tfFlags & 0x1) { base = readU32(b, q) * 0x100000000 + readU32(b, q + 4); q += 8; }
+      if (tfFlags & 0x2) q += 4;
+      if (tfFlags & 0x8) q += 4;
+      const defaultSize = tfFlags & 0x10 ? readU32(b, q) : 0;
+      const trun = mp4Child(b, traf, 'trun');
+      if (!trun) return { error: 'no trun' };
+      const trFlags = readU32(b, trun.body) & 0xffffff;
+      let r = trun.body + 8, dataOffset = 0;
+      if (trFlags & 0x1) { dataOffset = readU32(b, r) | 0; r += 4; }
+      if (trFlags & 0x4) r += 4;
+      if (trFlags & 0x100) r += 4;
+      const size = trFlags & 0x200 ? readU32(b, r) : defaultSize;
+      const pos = base + dataOffset;
+      if (pos + size > b.length) return null;
+      return { codec: init.codec, description: init.description, data: b.slice(pos, pos + size) };
+    }
+    return { error: 'video track missing from fragment' };
   }
 
   function onDocMouseUp() {
@@ -708,7 +909,8 @@
       e.preventDefault(); // avoid text selection while dragging
       seekDragging = true;
       seekbar.classList.add('tr-seekbar--active');
-      startRewind(clampSeekSeconds(pct));
+      dragTarget = seekTarget(pct);
+      startRewind(dragTarget);
     });
 
     state.ui.seekArea = seekArea;
