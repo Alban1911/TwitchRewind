@@ -452,11 +452,12 @@
 
     liveLabel.appendChild(liveText);
 
-    // Skip-to-end icon (native Twitch SVG, 20x20)
+    // Skip-to-end icon (native Twitch glyph). The viewBox is cropped to the
+    // glyph's bounds so styles.css can size it to the LIVE text
     const skipSvg = document.createElementNS(SVG_NS, 'svg');
-    skipSvg.setAttribute('width', '20');
-    skipSvg.setAttribute('height', '20');
-    skipSvg.setAttribute('viewBox', '0 0 24 24');
+    skipSvg.setAttribute('width', '9');
+    skipSvg.setAttribute('height', '10');
+    skipSvg.setAttribute('viewBox', '5 4 14 16');
     skipSvg.setAttribute('fill', 'currentColor');
     const skipPath = document.createElementNS(SVG_NS, 'path');
     skipPath.setAttribute('d', 'M5.794 4.578 16 12 5.794 19.422A.5.5 0 0 1 5 19.018V4.982a.5.5 0 0 1 .794-.404ZM17 4h2v16h-2V4Z');

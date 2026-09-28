@@ -34,17 +34,22 @@
   margin: 0;
 }
 
-/* LIVE label (text + skip-to-end icon, visible when rewinding) */
+/* LIVE label (text + skip-to-end icon, visible when rewinding). Both states
+   are the same box: fixed height, and at the live edge the icon keeps its
+   (hidden) slot so the width matches too — starting or ending a rewind never
+   resizes the button or the control bar */
 .tr-live-label {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
+  box-sizing: border-box;
+  height: 17px;
   cursor: pointer;
   color: #efeff1;
   background: rgba(255, 255, 255, 0.15);
   border: none;
   border-radius: 4px;
-  padding: 2px 6px;
+  padding: 0 6px;
   margin: 0;
   outline: none;
   transition: background-color 0.1s ease;
@@ -56,7 +61,6 @@
 
 .tr-live-label--at-live {
   background: #eb0400;
-  gap: 0;
 }
 
 .tr-live-label--at-live:hover {
@@ -64,7 +68,12 @@
 }
 
 .tr-live-label--at-live svg {
-  display: none;
+  visibility: hidden;
+}
+
+/* Re-center the text over the reserved slot: half of (icon 9px + gap 4px) */
+.tr-live-label--at-live .tr-live-text {
+  transform: translateX(6.5px);
 }
 
 .tr-live-text {
@@ -75,9 +84,10 @@
   line-height: 1;
 }
 
+/* Skip-to-end glyph sized to the text's cap height (viewBox is cropped to the glyph) */
 .tr-live-label svg {
-  width: 20px;
-  height: 20px;
+  width: 9px;
+  height: 10px;
   flex-shrink: 0;
   fill: currentColor;
 }
