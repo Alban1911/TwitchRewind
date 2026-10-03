@@ -391,9 +391,10 @@
 
   // Seekbar time -> where playback should start. Once previews work for this
   // VOD, that's the nearest keyframe — the frame the tooltip shows: what you
-  // see is where you land. Without previews, the exact time.
+  // see is where you land. Without previews — or past a preview playlist the
+  // recording has outgrown — the exact time.
   function seekTarget(sec) {
-    return previewsWorking() ? anchorAt(sec).time : sec;
+    return previewsWorking() && !beyondPreviewPlaylist(sec) ? anchorAt(sec).time : sec;
   }
 
   // Seek while dragging: directly once the VOD is ready, otherwise queue it
@@ -491,6 +492,15 @@
     return lo;
   }
 
+  // The recording grew past the preview playlist since it was read: anchorAt()
+  // would clamp `sec` to the old last keyframe (the time the playlist was read),
+  // so it needs a re-read first. Within the TTL the playlist is fresh, and the
+  // last keyframe really is the nearest one
+  function beyondPreviewPlaylist(sec) {
+    const src = preview.source;
+    return !!src && sec >= src.end && Date.now() - src.fetchedAt > PREVIEW_PLAYLIST_TTL;
+  }
+
   // Keyframe nearest to `sec` (k-th of its segment, on the 2 s grid, or the
   // segment start if the stream has no such grid). `time` is the frame's own
   // timestamp once decoded, the grid estimate before
@@ -524,7 +534,9 @@
     sb.tooltip.classList.toggle('tr-seekbar-tooltip--preview', on);
     if (!on) return;
     preview.wantTime = sec;
-    const frame = preview.source && preview.cache.get(anchorAt(sec).key);
+    // Past a stale playlist the cached last frame isn't what's there: fetch
+    // (which re-reads the playlist) instead of showing it
+    const frame = preview.source && !beyondPreviewPlaylist(sec) && preview.cache.get(anchorAt(sec).key);
     if (frame) {
       drawPreview(frame);
     } else {
@@ -546,11 +558,11 @@
   async function fetchPreviewFrame() {
     if (preview.loading || !previewsAvailable()) return;
     const gen = preview.gen;
+    const sec = preview.wantTime;
     preview.loading = true;
     try {
-      const sec = preview.wantTime;
       const src = preview.source;
-      if (!src || (sec >= src.end && Date.now() - src.fetchedAt > PREVIEW_PLAYLIST_TTL)) {
+      if (!src || beyondPreviewPlaylist(sec)) {
         const source = src ? await refreshPreviewSource(src) : await loadPreviewSource(state.vodUrl);
         if (gen !== preview.gen) return;
         preview.source = source;
@@ -570,7 +582,11 @@
     } finally {
       if (gen === preview.gen) preview.loading = false;
     }
-    const frame = preview.cache.get(anchorAt(preview.wantTime).key);
+    // Past a stale playlist, fetch again (it re-reads the playlist) rather
+    // than draw the cached last frame — but not for the spot just fetched, so
+    // a fetch slower than the TTL can't loop
+    const want = preview.wantTime;
+    const frame = (want === sec || !beyondPreviewPlaylist(want)) && preview.cache.get(anchorAt(want).key);
     if (frame) drawPreview(frame);
     else fetchPreviewFrame();
   }
