@@ -23,7 +23,7 @@
 
 > Not on any store yet — install it manually:
 
-Download the repository: **Code → Download ZIP** on [GitHub](https://github.com/Alban1911/TwitchRewind) (or `git clone`), then unzip it.
+Download **[TwitchRewind.zip](https://github.com/Alban1911/TwitchRewind/releases/latest/download/TwitchRewind.zip)** from the [latest release](https://github.com/Alban1911/TwitchRewind/releases/latest), then unzip it into a `TwitchRewind` folder.
 
 ### Chrome / Chromium
 
@@ -38,7 +38,7 @@ Requires Firefox 128 or later. Firefox only keeps signed add-ons installed, and 
 1. Open `about:debugging#/runtime/this-firefox`
 2. Click **Load Temporary Add-on…** and select the `manifest.json` file in the `TwitchRewind` folder
 
-Temporary add-ons are removed when Firefox closes, so repeat these steps after a restart. Firefox Developer Edition, Nightly and ESR can keep it installed instead: set `xpinstall.signatures.required` to `false` in `about:config`, zip the *contents* of the `TwitchRewind` folder (`manifest.json` at the root of the archive), rename the zip to `.xpi` and open it in Firefox.
+Temporary add-ons are removed when Firefox closes, so repeat these steps after a restart. Firefox Developer Edition, Nightly and ESR can keep it installed instead: set `xpinstall.signatures.required` to `false` in `about:config`, rename `TwitchRewind.zip` to `TwitchRewind.xpi` and open it in Firefox.
 
 ## Usage
 
